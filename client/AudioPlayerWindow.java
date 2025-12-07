@@ -34,6 +34,7 @@ public class AudioPlayerWindow {
     // Для управления перемоткой
     private boolean userIsAdjusting = false;
     private ChangeListener<Duration> timeChangeListener;
+    private boolean seeking = false;
     
     public AudioPlayerWindow(Client.MusicTrack track, int trackIndex, 
                            List<Client.MusicTrack> trackList, 
@@ -77,32 +78,39 @@ public class AudioPlayerWindow {
         progressSlider.setPrefWidth(400);
         progressSlider.setDisable(true);
         
-        // Обработка перемотки - исправленная версия
+        // ИСПРАВЛЕННАЯ обработка перемотки
         progressSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
             if (userIsAdjusting && mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
+                seeking = true;
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (newValue.doubleValue() / 100.0);
                 mediaPlayer.seek(Duration.seconds(seekTime));
+                Platform.runLater(() -> {
+                    updateTimeLabelForSeek(seekTime);
+                });
             }
         });
         
-        // Отслеживаем когда пользователь начинает и заканчивает перемотку
+        // Обработка событий мыши для перемотки
         progressSlider.setOnMousePressed(e -> {
             userIsAdjusting = true;
         });
         
         progressSlider.setOnMouseReleased(e -> {
-            userIsAdjusting = false;
             if (mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (progressSlider.getValue() / 100.0);
                 mediaPlayer.seek(Duration.seconds(seekTime));
+                updateTimeLabelForSeek(seekTime);
             }
+            userIsAdjusting = false;
+            seeking = false;
         });
         
-        // Для клика (не перетаскивания)
+        // Для клика на ползунок (без перетаскивания)
         progressSlider.setOnMouseClicked(e -> {
             if (!progressSlider.isValueChanging() && mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (progressSlider.getValue() / 100.0);
                 mediaPlayer.seek(Duration.seconds(seekTime));
+                updateTimeLabelForSeek(seekTime);
             }
         });
         
@@ -269,12 +277,16 @@ public class AudioPlayerWindow {
         // Создаем новый слушатель
         timeChangeListener = (observable, oldValue, newValue) -> {
             Platform.runLater(() -> {
-                if (!userIsAdjusting && mediaPlayer != null && 
+                if (!seeking && mediaPlayer != null && 
                     mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                     double currentTime = mediaPlayer.getCurrentTime().toSeconds();
                     double totalTime = mediaPlayer.getTotalDuration().toSeconds();
                     double progress = (currentTime / totalTime) * 100.0;
-                    progressSlider.setValue(progress);
+                    
+                    // Обновляем ползунок только если пользователь его не двигает
+                    if (!userIsAdjusting) {
+                        progressSlider.setValue(progress);
+                    }
                 }
                 updateTimeLabel();
             });
@@ -299,6 +311,8 @@ public class AudioPlayerWindow {
             timeLabel.setText("00:00 / " + track.getDuration());
             playPauseButton.setDisable(true);
             playPauseButton.setText("▶ Воспроизвести");
+            seeking = false;
+            userIsAdjusting = false;
             
             if (mediaPlayer != null) {
                 mediaPlayer.stop();
@@ -331,6 +345,8 @@ public class AudioPlayerWindow {
             playPauseButton.setText("▶ Воспроизвести");
             progressSlider.setValue(0);
             updateTimeLabel();
+            seeking = false;
+            userIsAdjusting = false;
         }
     }
     
@@ -369,6 +385,18 @@ public class AudioPlayerWindow {
             timeLabel.setText(current + " / " + total);
         } else {
             timeLabel.setText("00:00 / " + currentTrack.getDuration());
+        }
+    }
+    
+    private void updateTimeLabelForSeek(double seconds) {
+        if (mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
+            Duration totalTime = mediaPlayer.getTotalDuration();
+            Duration seekTime = Duration.seconds(seconds);
+            
+            String current = formatTime(seekTime);
+            String total = formatTime(totalTime);
+            
+            timeLabel.setText(current + " / " + total);
         }
     }
     
