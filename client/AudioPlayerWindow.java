@@ -10,6 +10,7 @@ import javafx.util.Duration;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.beans.value.ChangeListener;
+import javafx.scene.input.ScrollEvent;
 import java.io.*;
 import java.net.Socket;
 import java.util.List;
@@ -20,6 +21,7 @@ public class AudioPlayerWindow {
     private Client.MusicTrack currentTrack;
     private Label timeLabel;
     private Slider progressSlider;
+    private Slider volumeSlider;
     private Button playPauseButton;
     private Button previousButton;
     private Button nextButton;
@@ -37,10 +39,9 @@ public class AudioPlayerWindow {
     private ChangeListener<Duration> timeChangeListener;
     private boolean seeking = false;
     
-    // Новые размеры
-    private static final int COVER_SIZE = 320;  // Уменьшил для лучшего вписывания
-    private static final int WINDOW_WIDTH = COVER_SIZE; // + 60 пока эксперемент
-    private static final int WINDOW_HEIGHT = 520;  // Увеличил высоту
+    private static final int COVER_SIZE = 320;
+    private static final int WINDOW_WIDTH = COVER_SIZE;
+    private static final int WINDOW_HEIGHT = 550;
     
     public AudioPlayerWindow(Client.MusicTrack track, int trackIndex, 
                            List<Client.MusicTrack> trackList, 
@@ -66,7 +67,7 @@ public class AudioPlayerWindow {
         
         // Основной контейнер
         VBox root = new VBox(15);
-        root.setPadding(new Insets(0, 10, 25, 10));  // Увеличил нижний padding
+        root.setPadding(new Insets(0, 15, 25, 15));
         root.setAlignment(Pos.TOP_CENTER);
         
         // Обложка
@@ -106,7 +107,7 @@ public class AudioPlayerWindow {
         progressBox.setAlignment(Pos.CENTER);
         
         progressSlider = new Slider(0, 100, 0);
-        progressSlider.setPrefWidth(COVER_SIZE - 90);  // Уменьшил ширину для времени
+        progressSlider.setPrefWidth(COVER_SIZE - 90);
         progressSlider.setDisable(true);
         
         timeLabel = new Label("00:00 / " + currentTrack.getDuration());
@@ -121,28 +122,65 @@ public class AudioPlayerWindow {
         controlsContainer.setMaxWidth(COVER_SIZE);
         
         // Основные кнопки управления (play/pause/stop)
-        HBox mainControls = new HBox(15);
+        HBox mainControls = new HBox(10);
         mainControls.setAlignment(Pos.CENTER);
         
         previousButton = new Button("⏮");
         previousButton.setDisable(!hasPreviousTrack());
-        previousButton.setPrefWidth(60);
+        previousButton.setPrefWidth(50);
         
         playPauseButton = new Button("▶");
         playPauseButton.setDisable(true);
-        playPauseButton.setPrefWidth(60);
+        playPauseButton.setPrefWidth(50);
         
         Button stopButton = new Button("⏹");
-        stopButton.setPrefWidth(60);
+        stopButton.setPrefWidth(50);
         
         nextButton = new Button("⏭");
         nextButton.setDisable(!hasNextTrack());
-        nextButton.setPrefWidth(60);
+        nextButton.setPrefWidth(50);
         
         mainControls.getChildren().addAll(previousButton, playPauseButton, stopButton, nextButton);
         
+        // Контейнер для регулятора громкости
+        HBox volumeContainer = new HBox(10);
+        volumeContainer.setAlignment(Pos.CENTER);
+        volumeContainer.setMaxWidth(COVER_SIZE);
+        
+        // Иконка громкости
+        Label volumeIconLabel = new Label("🔊");
+        volumeIconLabel.setStyle("-fx-font-size: 16px;");
+        
+        // Слайдер громкости
+        volumeSlider = new Slider(0, 100, 80);
+        volumeSlider.setPrefWidth(COVER_SIZE - 60);
+        volumeSlider.setShowTickLabels(false);
+        volumeSlider.setShowTickMarks(false);
+        
+        // Обработчик изменения громкости
+        volumeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if (mediaPlayer != null) {
+                mediaPlayer.setVolume(newValue.doubleValue() / 100.0);
+            }
+        });
+        
+        // Обработка прокрутки мыши на слайдере громкости
+        volumeSlider.addEventFilter(ScrollEvent.SCROLL, event -> {
+            double delta = event.getDeltaY();
+            double currentValue = volumeSlider.getValue();
+            
+            if (delta > 0) {
+                volumeSlider.setValue(Math.min(100, currentValue + 5));
+            } else {
+                volumeSlider.setValue(Math.max(0, currentValue - 5));
+            }
+            event.consume();
+        });
+        
+        volumeContainer.getChildren().addAll(volumeIconLabel, volumeSlider);
+        
         // Добавляем все в контейнеры
-        progressContainer.getChildren().addAll(progressBox, mainControls);
+        progressContainer.getChildren().addAll(progressBox, mainControls, volumeContainer);
         
         // Добавляем отступ между группами элементов
         Region spacer1 = new Region();
@@ -264,6 +302,9 @@ public class AudioPlayerWindow {
                         
                         mediaPlayer = new MediaPlayer(media);
                         
+                        // Устанавливаем начальную громкость
+                        mediaPlayer.setVolume(volumeSlider.getValue() / 100.0);
+                        
                         mediaPlayer.setOnReady(() -> {
                             playPauseButton.setDisable(false);
                             progressSlider.setDisable(false);
@@ -360,11 +401,9 @@ public class AudioPlayerWindow {
     }
     
     private void loadDefaultCover() {
-        // Создаем простую обложку по умолчанию
         javafx.scene.canvas.Canvas canvas = new javafx.scene.canvas.Canvas(COVER_SIZE, COVER_SIZE);
         javafx.scene.canvas.GraphicsContext gc = canvas.getGraphicsContext2D();
         
-        // Градиент
         for (int y = 0; y < COVER_SIZE; y++) {
             for (int x = 0; x < COVER_SIZE; x++) {
                 double r = 0.1 + (0.3 * x / COVER_SIZE);
@@ -375,7 +414,6 @@ public class AudioPlayerWindow {
             }
         }
         
-        // Текст
         gc.setFill(javafx.scene.paint.Color.WHITE);
         gc.setFont(javafx.scene.text.Font.font("Arial", 18));
         
