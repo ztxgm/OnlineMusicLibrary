@@ -20,6 +20,9 @@ public class Client extends Application {
     private String currentServer = "localhost";
     private int currentPort = 12345;
     
+    // Статическая ссылка на окно плеера
+    private static AudioPlayerWindow playerWindow;
+    
     @Override
     public void start(Stage primaryStage) {
         VBox root = new VBox(10);
@@ -28,7 +31,7 @@ public class Client extends Application {
         HBox controlPanel = new HBox(10);
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("Обновить");
-        Button playButton = new Button("Воспроизвести");
+        Button playButton = new Button("Воспроизвести онлайн");
         playButton.setDisable(true);
         reloadButton.setDisable(true);
         
@@ -43,6 +46,13 @@ public class Client extends Application {
                 } else {
                     setText(item.toString());
                 }
+            }
+        });
+        
+        // Двойной клик для открытия плеера
+        listView.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2) {
+                openAudioPlayer();
             }
         });
         
@@ -63,7 +73,7 @@ public class Client extends Application {
         
         connectButton.setOnAction(e -> showConnectDialog());
         reloadButton.setOnAction(e -> loadTracks());
-        playButton.setOnAction(e -> streamAudio());
+        playButton.setOnAction(e -> openAudioPlayer());
         
         listView.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
@@ -79,9 +89,15 @@ public class Client extends Application {
         root.getChildren().addAll(controlPanel, listView, infoPanel);
         
         Scene scene = new Scene(root, 600, 400);
-        primaryStage.setTitle("OnlineMusicLibrary");
+        primaryStage.setTitle("AudioPlayerWindow");
         primaryStage.setScene(scene);
         primaryStage.show();
+        
+        primaryStage.setOnCloseRequest(e -> {
+            if (playerWindow != null) {
+                playerWindow.stopAudio();
+            }
+        });
         
         reloadButton.disableProperty().bind(
             statusLabel.textProperty().isEqualTo("Не подключено")
@@ -178,64 +194,39 @@ public class Client extends Application {
         }
     }
     
-    private void streamAudio() {
+    private void openAudioPlayer() {
         MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
         if (selectedTrack == null) {
             showAlert("Ошибка", "Выберите трек для воспроизведения");
             return;
         }
         
-        // Запускаем поток для стриминга аудио
-        new Thread(() -> {
-            try {
-                // Получаем имя файла с сервера
-                out.println("GET_FILE_INFO:" + selectedTrack.getId());
-                String filename = in.readLine();
-                
-                if (filename.startsWith("ERROR:")) {
-                    showAlert("Ошибка", "Файл не найден на сервере");
-                    return;
-                }
-                
-                // Создаем новое соединение для стриминга аудио
-                Socket audioSocket = new Socket(currentServer, currentPort);
-                PrintWriter audioOut = new PrintWriter(audioSocket.getOutputStream(), true);
-                BufferedReader audioIn = new BufferedReader(new InputStreamReader(audioSocket.getInputStream()));
-                
-                // Запрашиваем файл
-                audioOut.println("GET_FILE:" + filename);
-                
-                // Получаем информацию о размере файла
-                String response = audioIn.readLine();
-                if (!response.startsWith("FILE_SIZE:")) {
-                    showAlert("Ошибка", "Ошибка получения файла: " + response);
-                    audioSocket.close();
-                    return;
-                }
-                
-                long fileSize = Long.parseLong(response.substring(10));
-                
-                // Запускаем аудиоплеер в отдельном окне
-                javafx.application.Platform.runLater(() -> {
-                    AudioStreamPlayer player = new AudioStreamPlayer(selectedTrack, audioSocket, fileSize);
-                    player.show();
-                });
-                
-            } catch (Exception e) {
-                e.printStackTrace();
-                showAlert("Ошибка", "Не удалось начать стриминг: " + e.getMessage());
-            }
-        }).start();
+        int selectedIndex = listView.getSelectionModel().getSelectedIndex();
+        
+        // Если окно плеера уже существует, обновляем его
+        if (playerWindow != null && playerWindow.isShowing()) {
+            playerWindow.loadTrack(selectedTrack, selectedIndex, trackList);
+            playerWindow.selectInList(selectedIndex);
+        } else {
+            // Создаем новое окно
+            playerWindow = new AudioPlayerWindow(
+                selectedTrack, 
+                selectedIndex, 
+                trackList,
+                currentServer,
+                currentPort,
+                listView.getSelectionModel()  // Передаем selectionModel для синхронизации
+            );
+            playerWindow.show();
+        }
     }
     
     private void showAlert(String title, String message) {
-        javafx.application.Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setHeaderText(null);
-            alert.setContentText(message);
-            alert.showAndWait();
-        });
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
     
     public static void main(String[] args) {
