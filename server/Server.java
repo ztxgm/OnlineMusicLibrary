@@ -1,19 +1,22 @@
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.Font;
 
 public class Server {
     private static final int PORT = 12345;
     private static final String DB_FILE = "music_db.txt";
     private static final String MUSIC_DIR = "music";
+    private static final String COVERS_DIR = "covers";
     private static List<String> musicData = new ArrayList<>();
 
     public static void main(String[] args) {
-        // Создаем папку для музыки
-        File musicFolder = new File(MUSIC_DIR);
-        if (!musicFolder.exists()) {
-            musicFolder.mkdir();
-        }
+        new File(MUSIC_DIR).mkdir();
+        new File(COVERS_DIR).mkdir();
         
         loadDatabase();
         
@@ -54,14 +57,14 @@ public class Server {
     
     private static void createSampleData() throws IOException {
         try (PrintWriter writer = new PrintWriter(new FileWriter(DB_FILE))) {
-            writer.println("1:Bohemian Rhapsody:6:07:Queen:queen_bohemian.mp3");
-            writer.println("2:Hotel California:6:30:Eagles:eagles_hotel.mp3");
-            writer.println("3:Stairway to Heaven:8:02:Led Zeppelin:zeppelin_stairway.mp3");
-            writer.println("4:Smooth Criminal:4:17:Michael Jackson:jackson_smooth.mp3");
-            writer.println("5:Smells Like Teen Spirit:5:01:Nirvana:nirvana_teen.mp3");
-            writer.println("6:Billie Jean:4:54:Michael Jackson:jackson_billie.mp3");
-            writer.println("7:Like a Rolling Stone:6:13:Bob Dylan:dylan_rolling.mp3");
-            writer.println("8:Imagine:3:03:John Lennon:lennon_imagine.mp3");
+            writer.println("1:Bohemian Rhapsody:6:07:Queen:queen_bohemian.mp3:-");
+            writer.println("2:Hotel California:6:30:Eagles:eagles_hotel.mp3:-");
+            writer.println("3:Stairway to Heaven:8:02:Led Zeppelin:zeppelin_stairway.mp3:-");
+            writer.println("4:Smooth Criminal:4:17:Michael Jackson:jackson_smooth.mp3:-");
+            writer.println("5:Smells Like Teen Spirit:5:01:Nirvana:nirvana_teen.mp3:-");
+            writer.println("6:Billie Jean:4:54:Michael Jackson:jackson_billie.mp3:-");
+            writer.println("7:Like a Rolling Stone:6:13:Bob Dylan:dylan_rolling.mp3:-");
+            writer.println("8:Imagine:3:03:John Lennon:lennon_imagine.mp3:-");
         }
     }
     
@@ -88,12 +91,20 @@ public class Server {
                         out.println("END");
                     } else if (request.startsWith("GET_FILE:")) {
                         String filename = request.substring(9);
-                        sendAudioFile(filename, socket.getOutputStream());
-                        break; // После отправки файла закрываем соединение
+                        sendFile(MUSIC_DIR, filename, socket.getOutputStream());
+                        break;
+                    } else if (request.startsWith("GET_COVER:")) {
+                        String coverFilename = request.substring(10);
+                        sendCover(coverFilename, socket.getOutputStream());
+                        break;
                     } else if (request.startsWith("GET_FILE_INFO:")) {
                         String id = request.substring(14);
-                        String fileInfo = getFileInfo(id);
-                        out.println(fileInfo != null ? fileInfo : "ERROR:File not found");
+                        String[] fileInfo = getFileInfo(id);
+                        if (fileInfo != null) {
+                            out.println(fileInfo[0] + ":" + fileInfo[1]);
+                        } else {
+                            out.println("ERROR:File not found");
+                        }
                     } else if (request.equals("RELOAD")) {
                         loadDatabase();
                         out.println("OK");
@@ -112,24 +123,22 @@ public class Server {
             }
         }
         
-        private void sendAudioFile(String filename, OutputStream socketOut) {
+        private void sendFile(String directory, String filename, OutputStream socketOut) {
             try {
-                File audioFile = new File(MUSIC_DIR + File.separator + filename);
-                if (!audioFile.exists()) {
-                    System.out.println("Файл не найден: " + audioFile.getAbsolutePath());
+                File file = new File(directory + File.separator + filename);
+                if (!file.exists()) {
+                    System.out.println("Файл не найден: " + file.getAbsolutePath());
                     PrintWriter out = new PrintWriter(socketOut, true);
                     out.println("ERROR:File not found");
                     return;
                 }
                 
-                System.out.println("Отправка файла: " + audioFile.getName() + " размер: " + audioFile.length());
+                System.out.println("Отправка файла: " + file.getName() + " размер: " + file.length());
                 
-                // Отправляем размер файла
                 PrintWriter out = new PrintWriter(socketOut, true);
-                out.println("FILE_SIZE:" + audioFile.length());
+                out.println("FILE_SIZE:" + file.length());
                 
-                // Отправляем сам файл
-                try (FileInputStream fis = new FileInputStream(audioFile);
+                try (FileInputStream fis = new FileInputStream(file);
                      BufferedInputStream bis = new BufferedInputStream(fis)) {
                     
                     byte[] buffer = new byte[8192];
@@ -149,11 +158,68 @@ public class Server {
             }
         }
         
-        private String getFileInfo(String id) {
+        private void sendCover(String coverFilename, OutputStream socketOut) {
+            try {
+                File coverFile = new File(COVERS_DIR + File.separator + coverFilename);
+                
+                if (coverFile.exists()) {
+                    sendFile(COVERS_DIR, coverFilename, socketOut);
+                } else {
+                    // Если обложки нет, создаем обложку по умолчанию
+                    createAndSendDefaultCover(socketOut);
+                }
+                
+            } catch (Exception e) {
+                System.out.println("Ошибка при отправке обложки: " + e.getMessage());
+            }
+        }
+        
+        private void createAndSendDefaultCover(OutputStream socketOut) throws IOException {
+            int width = 300;
+            int height = 300;
+            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            
+            Graphics2D g2d = image.createGraphics();
+            
+            // Градиентный фон
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int r = 40 + (x * 60) / width;
+                    int g = 40 + (y * 60) / height;
+                    int b = 100;
+                    int rgb = (r << 16) | (g << 8) | b;
+                    image.setRGB(x, y, rgb);
+                }
+            }
+            
+            // Текст
+            g2d.setColor(Color.WHITE);
+            g2d.setFont(new Font("Arial", Font.BOLD, 24));
+            String text = "Музыка";
+            int textWidth = g2d.getFontMetrics().stringWidth(text);
+            int x = (width - textWidth) / 2;
+            int y = height / 2;
+            g2d.drawString(text, x, y);
+            
+            g2d.dispose();
+            
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", baos);
+            byte[] imageData = baos.toByteArray();
+            
+            PrintWriter out = new PrintWriter(socketOut, true);
+            out.println("FILE_SIZE:" + imageData.length);
+            socketOut.write(imageData, 0, imageData.length);
+            socketOut.flush();
+        }
+        
+        private String[] getFileInfo(String id) {
             for (String record : musicData) {
                 String[] parts = record.split(":");
                 if (parts.length >= 6 && parts[0].equals(id)) {
-                    return parts[5]; // возвращаем имя файла
+                    String audioFile = parts[5];
+                    String coverFile = parts.length >= 7 ? parts[6] : "-";
+                    return new String[]{audioFile, coverFile};
                 }
             }
             return null;

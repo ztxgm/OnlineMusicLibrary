@@ -2,6 +2,7 @@ import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.scene.image.*;
 import javafx.stage.Stage;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
@@ -9,7 +10,6 @@ import javafx.util.Duration;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import java.io.*;
 import java.net.Socket;
 import java.util.List;
@@ -24,6 +24,8 @@ public class AudioPlayerWindow {
     private Button previousButton;
     private Button nextButton;
     private Label trackTitleLabel;
+    private Label artistLabel;
+    private ImageView coverImageView;
     
     private List<Client.MusicTrack> trackList;
     private int currentTrackIndex;
@@ -31,10 +33,14 @@ public class AudioPlayerWindow {
     private int serverPort;
     private MultipleSelectionModel<Client.MusicTrack> selectionModel;
     
-    // Для управления перемоткой
     private boolean userIsAdjusting = false;
     private ChangeListener<Duration> timeChangeListener;
     private boolean seeking = false;
+    
+    // Новые размеры
+    private static final int COVER_SIZE = 320;  // Уменьшил для лучшего вписывания
+    private static final int WINDOW_WIDTH = COVER_SIZE; // + 60 пока эксперемент
+    private static final int WINDOW_HEIGHT = 520;  // Увеличил высоту
     
     public AudioPlayerWindow(Client.MusicTrack track, int trackIndex, 
                            List<Client.MusicTrack> trackList, 
@@ -53,32 +59,107 @@ public class AudioPlayerWindow {
     
     private void createWindow() {
         stage = new Stage();
-        stage.setTitle("Онлайн аудиоплеер");
-        stage.setWidth(600);
-        stage.setHeight(200);
+        stage.setTitle(currentTrack.getTitle());
+        stage.setWidth(WINDOW_WIDTH);
+        stage.setHeight(WINDOW_HEIGHT);
         stage.setResizable(false);
         
-        VBox root = new VBox(10);
-        root.setPadding(new Insets(15));
+        // Основной контейнер
+        VBox root = new VBox(15);
+        root.setPadding(new Insets(0, 10, 25, 10));  // Увеличил нижний padding
+        root.setAlignment(Pos.TOP_CENTER);
         
-        // Заголовок трека
+        // Обложка
+        coverImageView = new ImageView();
+        coverImageView.setFitWidth(COVER_SIZE);
+        coverImageView.setFitHeight(COVER_SIZE);
+        coverImageView.setPreserveRatio(true);
+        coverImageView.setSmooth(true);
+        coverImageView.setCache(true);
+        
+        // Контейнер для текста
+        VBox textContainer = new VBox(8);
+        textContainer.setAlignment(Pos.CENTER);
+        textContainer.setMaxWidth(COVER_SIZE);
+        
         trackTitleLabel = new Label(currentTrack.getTitle());
         trackTitleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
-        trackTitleLabel.setMaxWidth(Double.MAX_VALUE);
+        trackTitleLabel.setWrapText(true);
+        trackTitleLabel.setMaxWidth(COVER_SIZE);
         trackTitleLabel.setAlignment(Pos.CENTER);
         
-        Label artistLabel = new Label("Исполнитель: " + currentTrack.getArtist());
-        artistLabel.setStyle("-fx-font-size: 12px;");
+        artistLabel = new Label(currentTrack.getArtist());
+        artistLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #666;");
+        artistLabel.setWrapText(true);
+        artistLabel.setMaxWidth(COVER_SIZE);
+        artistLabel.setAlignment(Pos.CENTER);
         
-        // Панель с прогрессом и временем
+        textContainer.getChildren().addAll(trackTitleLabel, artistLabel);
+        
+        // Контейнер для прогресса
+        VBox progressContainer = new VBox(10);
+        progressContainer.setAlignment(Pos.CENTER);
+        progressContainer.setMaxWidth(COVER_SIZE);
+        
+        // Ползунок и время в одной строке
         HBox progressBox = new HBox(10);
         progressBox.setAlignment(Pos.CENTER);
         
         progressSlider = new Slider(0, 100, 0);
-        progressSlider.setPrefWidth(400);
+        progressSlider.setPrefWidth(COVER_SIZE - 90);  // Уменьшил ширину для времени
         progressSlider.setDisable(true);
         
-        // ИСПРАВЛЕННАЯ обработка перемотки
+        timeLabel = new Label("00:00 / " + currentTrack.getDuration());
+        timeLabel.setMinWidth(85);
+        timeLabel.setStyle("-fx-font-size: 12px;");
+        
+        progressBox.getChildren().addAll(progressSlider, timeLabel);
+        
+        // Контейнер для кнопок управления
+        VBox controlsContainer = new VBox(15);
+        controlsContainer.setAlignment(Pos.CENTER);
+        controlsContainer.setMaxWidth(COVER_SIZE);
+        
+        // Основные кнопки управления (play/pause/stop)
+        HBox mainControls = new HBox(15);
+        mainControls.setAlignment(Pos.CENTER);
+        
+        previousButton = new Button("⏮");
+        previousButton.setDisable(!hasPreviousTrack());
+        previousButton.setPrefWidth(60);
+        
+        playPauseButton = new Button("▶");
+        playPauseButton.setDisable(true);
+        playPauseButton.setPrefWidth(60);
+        
+        Button stopButton = new Button("⏹");
+        stopButton.setPrefWidth(60);
+        
+        nextButton = new Button("⏭");
+        nextButton.setDisable(!hasNextTrack());
+        nextButton.setPrefWidth(60);
+        
+        mainControls.getChildren().addAll(previousButton, playPauseButton, stopButton, nextButton);
+        
+        // Добавляем все в контейнеры
+        progressContainer.getChildren().addAll(progressBox, mainControls);
+        
+        // Добавляем отступ между группами элементов
+        Region spacer1 = new Region();
+        VBox.setVgrow(spacer1, Priority.ALWAYS);
+        
+        Region spacer2 = new Region();
+        VBox.setVgrow(spacer2, Priority.ALWAYS);
+        
+        root.getChildren().addAll(coverImageView, textContainer, spacer1, progressContainer, spacer2);
+        
+        // Обработчики событий
+        playPauseButton.setOnAction(e -> togglePlayPause());
+        stopButton.setOnAction(e -> stop());
+        previousButton.setOnAction(e -> playPreviousTrack());
+        nextButton.setOnAction(e -> playNextTrack());
+        
+        // Обработка перемотки
         progressSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
             if (userIsAdjusting && mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                 seeking = true;
@@ -90,11 +171,7 @@ public class AudioPlayerWindow {
             }
         });
         
-        // Обработка событий мыши для перемотки
-        progressSlider.setOnMousePressed(e -> {
-            userIsAdjusting = true;
-        });
-        
+        progressSlider.setOnMousePressed(e -> userIsAdjusting = true);
         progressSlider.setOnMouseReleased(e -> {
             if (mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (progressSlider.getValue() / 100.0);
@@ -105,7 +182,6 @@ public class AudioPlayerWindow {
             seeking = false;
         });
         
-        // Для клика на ползунок (без перетаскивания)
         progressSlider.setOnMouseClicked(e -> {
             if (!progressSlider.isValueChanging() && mediaPlayer != null && mediaPlayer.getTotalDuration().greaterThan(Duration.ZERO)) {
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (progressSlider.getValue() / 100.0);
@@ -114,87 +190,49 @@ public class AudioPlayerWindow {
             }
         });
         
-        timeLabel = new Label("00:00 / " + currentTrack.getDuration());
-        timeLabel.setMinWidth(100);
-        
-        progressBox.getChildren().addAll(progressSlider, timeLabel);
-        
-        // Панель управления
-        HBox controlsBox = new HBox(15);
-        controlsBox.setAlignment(Pos.CENTER);
-        
-        previousButton = new Button("⏮ Предыдущий");
-        previousButton.setDisable(!hasPreviousTrack());
-        
-        playPauseButton = new Button("▶ Воспроизвести");
-        playPauseButton.setDisable(true);
-        
-        Button stopButton = new Button("⏹ Стоп");
-        
-        nextButton = new Button("Следующий ⏭");
-        nextButton.setDisable(!hasNextTrack());
-        
-        controlsBox.getChildren().addAll(previousButton, playPauseButton, stopButton, nextButton);
-        
-        // Обработчики событий
-        playPauseButton.setOnAction(e -> togglePlayPause());
-        stopButton.setOnAction(e -> stop());
-        previousButton.setOnAction(e -> playPreviousTrack());
-        nextButton.setOnAction(e -> playNextTrack());
-        
-        root.getChildren().addAll(trackTitleLabel, artistLabel, progressBox, controlsBox);
-        
-        // Обработка закрытия окна
-        stage.setOnCloseRequest(e -> {
-            stopAudio();
-        });
+        stage.setOnCloseRequest(e -> stopAudio());
         
         Scene scene = new Scene(root);
         stage.setScene(scene);
         
-        // Синхронизируем выделение в списке
+        loadCover(currentTrack.getCover());
         selectInList(currentTrackIndex);
     }
     
     private void loadAndPlayTrack() {
         new Thread(() -> {
             try {
-                // Получаем имя файла с сервера
                 Socket infoSocket = new Socket(serverAddress, serverPort);
                 PrintWriter infoOut = new PrintWriter(infoSocket.getOutputStream(), true);
                 BufferedReader infoIn = new BufferedReader(new InputStreamReader(infoSocket.getInputStream()));
                 
                 infoOut.println("GET_FILE_INFO:" + currentTrack.getId());
-                String filename = infoIn.readLine();
-                
+                String response = infoIn.readLine();
                 infoSocket.close();
                 
-                if (filename.startsWith("ERROR:")) {
-                    Platform.runLater(() -> {
-                        showError("Файл не найден на сервере");
-                    });
+                if (response.startsWith("ERROR:")) {
+                    Platform.runLater(() -> showError("Файл не найден на сервере"));
                     return;
                 }
                 
-                // Создаем соединение для загрузки файла
+                String[] fileInfo = response.split(":");
+                String audioFilename = fileInfo[0];
+                
                 Socket audioSocket = new Socket(serverAddress, serverPort);
                 PrintWriter audioOut = new PrintWriter(audioSocket.getOutputStream(), true);
                 BufferedReader audioIn = new BufferedReader(new InputStreamReader(audioSocket.getInputStream()));
                 
-                audioOut.println("GET_FILE:" + filename);
+                audioOut.println("GET_FILE:" + audioFilename);
                 
-                String response = audioIn.readLine();
-                if (!response.startsWith("FILE_SIZE:")) {
-                    Platform.runLater(() -> {
-                        showError("Ошибка получения файла: " + response);
-                    });
+                String fileResponse = audioIn.readLine();
+                if (!fileResponse.startsWith("FILE_SIZE:")) {
+                    Platform.runLater(() -> showError("Ошибка получения файла: " + fileResponse));
                     audioSocket.close();
                     return;
                 }
                 
-                long fileSize = Long.parseLong(response.substring(10));
+                long fileSize = Long.parseLong(fileResponse.substring(10));
                 
-                // Создаем временный файл
                 File tempFile = File.createTempFile("stream_", ".mp3");
                 tempFile.deleteOnExit();
                 
@@ -214,7 +252,6 @@ public class AudioPlayerWindow {
                 
                 audioSocket.close();
                 
-                // Загружаем и воспроизводим трек
                 Platform.runLater(() -> {
                     try {
                         String fileUrl = tempFile.toURI().toString();
@@ -232,17 +269,13 @@ public class AudioPlayerWindow {
                             progressSlider.setDisable(false);
                             updateTimeLabel();
                             
-                            // Автоматически начинаем воспроизведение
                             mediaPlayer.play();
-                            playPauseButton.setText("⏸ Пауза");
-                            
-                            // Обновляем слушатель времени
+                            playPauseButton.setText("⏸");
                             setupTimeListener();
                         });
                         
                         mediaPlayer.setOnEndOfMedia(() -> {
-                            playPauseButton.setText("▶ Воспроизвести");
-                            // Автоматически переходим к следующему треку
+                            playPauseButton.setText("▶");
                             Platform.runLater(() -> {
                                 if (hasNextTrack()) {
                                     playNextTrack();
@@ -261,20 +294,107 @@ public class AudioPlayerWindow {
                 });
                 
             } catch (Exception e) {
-                Platform.runLater(() -> {
-                    showError("Ошибка загрузки трека: " + e.getMessage());
-                });
+                Platform.runLater(() -> showError("Ошибка загрузки трека: " + e.getMessage()));
             }
         }).start();
     }
     
+    private void loadCover(String coverFilename) {
+        if (coverFilename == null || coverFilename.isEmpty() || coverFilename.equals("-")) {
+            loadDefaultCover();
+        } else {
+            loadCoverFile(coverFilename);
+        }
+    }
+    
+    private void loadCoverFile(String coverFilename) {
+        new Thread(() -> {
+            try {
+                Socket coverSocket = new Socket(serverAddress, serverPort);
+                PrintWriter coverOut = new PrintWriter(coverSocket.getOutputStream(), true);
+                BufferedReader coverIn = new BufferedReader(new InputStreamReader(coverSocket.getInputStream()));
+                
+                coverOut.println("GET_COVER:" + coverFilename);
+                
+                String response = coverIn.readLine();
+                if (!response.startsWith("FILE_SIZE:")) {
+                    Platform.runLater(() -> loadDefaultCover());
+                    coverSocket.close();
+                    return;
+                }
+                
+                long fileSize = Long.parseLong(response.substring(10));
+                
+                File tempFile = File.createTempFile("cover_", ".png");
+                tempFile.deleteOnExit();
+                
+                try (FileOutputStream fos = new FileOutputStream(tempFile);
+                     InputStream is = coverSocket.getInputStream()) {
+                    
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    long totalRead = 0;
+                    
+                    while (totalRead < fileSize && 
+                           (bytesRead = is.read(buffer, 0, (int)Math.min(buffer.length, fileSize - totalRead))) != -1) {
+                        fos.write(buffer, 0, bytesRead);
+                        totalRead += bytesRead;
+                    }
+                }
+                
+                coverSocket.close();
+                
+                Platform.runLater(() -> {
+                    try {
+                        Image image = new Image(tempFile.toURI().toString(), COVER_SIZE, COVER_SIZE, true, true, true);
+                        coverImageView.setImage(image);
+                    } catch (Exception e) {
+                        loadDefaultCover();
+                    }
+                });
+                
+            } catch (Exception e) {
+                Platform.runLater(() -> loadDefaultCover());
+            }
+        }).start();
+    }
+    
+    private void loadDefaultCover() {
+        // Создаем простую обложку по умолчанию
+        javafx.scene.canvas.Canvas canvas = new javafx.scene.canvas.Canvas(COVER_SIZE, COVER_SIZE);
+        javafx.scene.canvas.GraphicsContext gc = canvas.getGraphicsContext2D();
+        
+        // Градиент
+        for (int y = 0; y < COVER_SIZE; y++) {
+            for (int x = 0; x < COVER_SIZE; x++) {
+                double r = 0.1 + (0.3 * x / COVER_SIZE);
+                double g = 0.1 + (0.3 * y / COVER_SIZE);
+                double b = 0.4;
+                gc.setFill(javafx.scene.paint.Color.color(r, g, b));
+                gc.fillRect(x, y, 1, 1);
+            }
+        }
+        
+        // Текст
+        gc.setFill(javafx.scene.paint.Color.WHITE);
+        gc.setFont(javafx.scene.text.Font.font("Arial", 18));
+        
+        String title = currentTrack.getTitle();
+        if (title.length() > 20) title = title.substring(0, 17) + "...";
+        gc.fillText(title, COVER_SIZE/2 - 50, COVER_SIZE/2 - 10);
+        
+        String artist = currentTrack.getArtist();
+        if (artist.length() > 25) artist = artist.substring(0, 22) + "...";
+        gc.fillText(artist, COVER_SIZE/2 - 60, COVER_SIZE/2 + 20);
+        
+        coverImageView.setImage(canvas.snapshot(null, null));
+    }
+    
     private void setupTimeListener() {
-        // Удаляем предыдущий слушатель если есть
         if (timeChangeListener != null && mediaPlayer != null) {
             mediaPlayer.currentTimeProperty().removeListener(timeChangeListener);
         }
         
-        // Создаем новый слушатель
         timeChangeListener = (observable, oldValue, newValue) -> {
             Platform.runLater(() -> {
                 if (!seeking && mediaPlayer != null && 
@@ -283,7 +403,6 @@ public class AudioPlayerWindow {
                     double totalTime = mediaPlayer.getTotalDuration().toSeconds();
                     double progress = (currentTime / totalTime) * 100.0;
                     
-                    // Обновляем ползунок только если пользователь его не двигает
                     if (!userIsAdjusting) {
                         progressSlider.setValue(progress);
                     }
@@ -292,7 +411,6 @@ public class AudioPlayerWindow {
             });
         };
         
-        // Добавляем слушатель
         if (mediaPlayer != null) {
             mediaPlayer.currentTimeProperty().addListener(timeChangeListener);
         }
@@ -304,13 +422,15 @@ public class AudioPlayerWindow {
         this.trackList = trackList;
         
         Platform.runLater(() -> {
+            stage.setTitle(track.getTitle());
             trackTitleLabel.setText(track.getTitle());
+            artistLabel.setText(track.getArtist());
             previousButton.setDisable(!hasPreviousTrack());
             nextButton.setDisable(!hasNextTrack());
             progressSlider.setValue(0);
             timeLabel.setText("00:00 / " + track.getDuration());
             playPauseButton.setDisable(true);
-            playPauseButton.setText("▶ Воспроизвести");
+            playPauseButton.setText("▶");
             seeking = false;
             userIsAdjusting = false;
             
@@ -320,7 +440,7 @@ public class AudioPlayerWindow {
                 mediaPlayer = null;
             }
             
-            // Синхронизируем выделение в списке
+            loadCover(track.getCover());
             selectInList(trackIndex);
         });
         
@@ -332,17 +452,17 @@ public class AudioPlayerWindow {
         
         if (mediaPlayer.getStatus() == MediaPlayer.Status.PLAYING) {
             mediaPlayer.pause();
-            playPauseButton.setText("▶ Воспроизвести");
+            playPauseButton.setText("▶");
         } else {
             mediaPlayer.play();
-            playPauseButton.setText("⏸ Пауза");
+            playPauseButton.setText("⏸");
         }
     }
     
     private void stop() {
         if (mediaPlayer != null) {
             mediaPlayer.stop();
-            playPauseButton.setText("▶ Воспроизвести");
+            playPauseButton.setText("▶");
             progressSlider.setValue(0);
             updateTimeLabel();
             seeking = false;

@@ -31,7 +31,7 @@ public class Client extends Application {
         HBox controlPanel = new HBox(10);
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("Обновить");
-        Button playButton = new Button("Воспроизвести онлайн");
+        Button playButton = new Button("Воспроизвести");
         playButton.setDisable(true);
         reloadButton.setDisable(true);
         
@@ -89,7 +89,7 @@ public class Client extends Application {
         root.getChildren().addAll(controlPanel, listView, infoPanel);
         
         Scene scene = new Scene(root, 600, 400);
-        primaryStage.setTitle("AudioPlayerWindow");
+        primaryStage.setTitle("OnlineMusicLibrary");
         primaryStage.setScene(scene);
         primaryStage.show();
         
@@ -206,7 +206,6 @@ public class Client extends Application {
         // Если окно плеера уже существует, обновляем его
         if (playerWindow != null && playerWindow.isShowing()) {
             playerWindow.loadTrack(selectedTrack, selectedIndex, trackList);
-            playerWindow.selectInList(selectedIndex);
         } else {
             // Создаем новое окно
             playerWindow = new AudioPlayerWindow(
@@ -250,20 +249,23 @@ public class Client extends Application {
         private String duration;
         private String artist;
         private String filename;
+        private String cover;
         
-        public MusicTrack(String id, String title, String duration, String artist, String filename) {
+        public MusicTrack(String id, String title, String duration, String artist, String filename, String cover) {
             this.id = id;
             this.title = title;
             this.duration = duration;
             this.artist = artist;
             this.filename = filename;
+            this.cover = cover;
         }
         
         public static MusicTrack fromString(String str) {
             try {
                 String[] parts = str.split(":");
                 if (parts.length >= 6) {
-                    return new MusicTrack(parts[0], parts[1], parts[2] + ":" + parts[3], parts[4], parts[5]);
+                    String cover = parts.length >= 7 ? parts[6] : "-";
+                    return new MusicTrack(parts[0], parts[1], parts[2] + ":" + parts[3], parts[4], parts[5], cover);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -276,6 +278,7 @@ public class Client extends Application {
         public String getDuration() { return duration; }
         public String getArtist() { return artist; }
         public String getFilename() { return filename; }
+        public String getCover() { return cover; }
         
         @Override
         public String toString() {
