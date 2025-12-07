@@ -18,6 +18,7 @@ public class Client extends Application {
     private Label statusLabel = new Label("Не подключено");
     private Label selectedTrackLabel = new Label("Выберите трек");
     private String currentServer = "localhost";
+    private int currentPort = 12345;
     
     @Override
     public void start(Stage primaryStage) {
@@ -27,9 +28,11 @@ public class Client extends Application {
         HBox controlPanel = new HBox(10);
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("Обновить");
+        Button playButton = new Button("Воспроизвести");
+        playButton.setDisable(true);
         reloadButton.setDisable(true);
         
-        controlPanel.getChildren().addAll(connectButton, reloadButton, statusLabel);
+        controlPanel.getChildren().addAll(connectButton, reloadButton, playButton, statusLabel);
         
         listView.setCellFactory(param -> new ListCell<MusicTrack>() {
             @Override
@@ -60,11 +63,15 @@ public class Client extends Application {
         
         connectButton.setOnAction(e -> showConnectDialog());
         reloadButton.setOnAction(e -> loadTracks());
+        playButton.setOnAction(e -> streamAudio());
         
         listView.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
                 if (newValue != null) {
                     selectedTrackLabel.setText(newValue.getTitle() + " (" + newValue.getDuration() + ")");
+                    playButton.setDisable(false);
+                } else {
+                    playButton.setDisable(true);
                 }
             }
         );
@@ -72,7 +79,7 @@ public class Client extends Application {
         root.getChildren().addAll(controlPanel, listView, infoPanel);
         
         Scene scene = new Scene(root, 600, 400);
-        primaryStage.setTitle("Музыкальная библиотека");
+        primaryStage.setTitle("OnlineMusicLibrary");
         primaryStage.setScene(scene);
         primaryStage.show();
         
@@ -82,29 +89,48 @@ public class Client extends Application {
     }
     
     private void showConnectDialog() {
-        Dialog<String> dialog = new Dialog<>();
+        Dialog<ConnectionInfo> dialog = new Dialog<>();
         dialog.setTitle("Подключение к серверу");
-        dialog.setHeaderText("Введите адрес сервера:");
+        dialog.setHeaderText("Введите параметры подключения:");
         
         ButtonType connectButtonType = new ButtonType("Подключиться", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(connectButtonType, ButtonType.CANCEL);
         
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+        
         TextField serverAddress = new TextField("localhost");
         serverAddress.setPromptText("localhost или IP адрес");
         
-        VBox content = new VBox(10);
-        content.getChildren().addAll(new Label("Адрес сервера:"), serverAddress);
-        dialog.getDialogPane().setContent(content);
+        TextField portField = new TextField("12345");
+        portField.setPromptText("Порт");
+        
+        grid.add(new Label("Адрес сервера:"), 0, 0);
+        grid.add(serverAddress, 1, 0);
+        grid.add(new Label("Порт:"), 0, 1);
+        grid.add(portField, 1, 1);
+        
+        dialog.getDialogPane().setContent(grid);
         
         dialog.setResultConverter(dialogButton -> {
             if (dialogButton == connectButtonType) {
-                return serverAddress.getText();
+                try {
+                    return new ConnectionInfo(
+                        serverAddress.getText(),
+                        Integer.parseInt(portField.getText())
+                    );
+                } catch (NumberFormatException e) {
+                    return null;
+                }
             }
             return null;
         });
         
-        dialog.showAndWait().ifPresent(server -> {
-            currentServer = server;
+        dialog.showAndWait().ifPresent(info -> {
+            currentServer = info.server;
+            currentPort = info.port;
             connectToServer();
         });
     }
@@ -115,16 +141,16 @@ public class Client extends Application {
                 socket.close();
             }
             
-            socket = new Socket(currentServer, 12345);
+            socket = new Socket(currentServer, currentPort);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
             
-            statusLabel.setText("Подключено к " + currentServer);
+            statusLabel.setText("Подключено к " + currentServer + ":" + currentPort);
             loadTracks();
             
         } catch (IOException e) {
             statusLabel.setText("Ошибка подключения: " + e.getMessage());
-            showAlert("Ошибка подключения", "Не удалось подключиться к серверу " + currentServer);
+            showAlert("Ошибка подключения", "Не удалось подключиться к серверу " + currentServer + ":" + currentPort);
         }
     }
     
@@ -152,16 +178,79 @@ public class Client extends Application {
         }
     }
     
+    private void streamAudio() {
+        MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
+        if (selectedTrack == null) {
+            showAlert("Ошибка", "Выберите трек для воспроизведения");
+            return;
+        }
+        
+        // Запускаем поток для стриминга аудио
+        new Thread(() -> {
+            try {
+                // Получаем имя файла с сервера
+                out.println("GET_FILE_INFO:" + selectedTrack.getId());
+                String filename = in.readLine();
+                
+                if (filename.startsWith("ERROR:")) {
+                    showAlert("Ошибка", "Файл не найден на сервере");
+                    return;
+                }
+                
+                // Создаем новое соединение для стриминга аудио
+                Socket audioSocket = new Socket(currentServer, currentPort);
+                PrintWriter audioOut = new PrintWriter(audioSocket.getOutputStream(), true);
+                BufferedReader audioIn = new BufferedReader(new InputStreamReader(audioSocket.getInputStream()));
+                
+                // Запрашиваем файл
+                audioOut.println("GET_FILE:" + filename);
+                
+                // Получаем информацию о размере файла
+                String response = audioIn.readLine();
+                if (!response.startsWith("FILE_SIZE:")) {
+                    showAlert("Ошибка", "Ошибка получения файла: " + response);
+                    audioSocket.close();
+                    return;
+                }
+                
+                long fileSize = Long.parseLong(response.substring(10));
+                
+                // Запускаем аудиоплеер в отдельном окне
+                javafx.application.Platform.runLater(() -> {
+                    AudioStreamPlayer player = new AudioStreamPlayer(selectedTrack, audioSocket, fileSize);
+                    player.show();
+                });
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+                showAlert("Ошибка", "Не удалось начать стриминг: " + e.getMessage());
+            }
+        }).start();
+    }
+    
     private void showAlert(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+        javafx.application.Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(message);
+            alert.showAndWait();
+        });
     }
     
     public static void main(String[] args) {
         launch(args);
+    }
+    
+    // Класс для хранения информации о подключении
+    private static class ConnectionInfo {
+        String server;
+        int port;
+        
+        ConnectionInfo(String server, int port) {
+            this.server = server;
+            this.port = port;
+        }
     }
     
     public static class MusicTrack {
@@ -169,19 +258,21 @@ public class Client extends Application {
         private String title;
         private String duration;
         private String artist;
+        private String filename;
         
-        public MusicTrack(String id, String title, String duration, String artist) {
+        public MusicTrack(String id, String title, String duration, String artist, String filename) {
             this.id = id;
             this.title = title;
             this.duration = duration;
             this.artist = artist;
+            this.filename = filename;
         }
         
         public static MusicTrack fromString(String str) {
             try {
                 String[] parts = str.split(":");
-                if (parts.length >= 5) {
-                    return new MusicTrack(parts[0], parts[1], parts[2] + ":" + parts[3], parts[4]);
+                if (parts.length >= 6) {
+                    return new MusicTrack(parts[0], parts[1], parts[2] + ":" + parts[3], parts[4], parts[5]);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -193,6 +284,7 @@ public class Client extends Application {
         public String getTitle() { return title; }
         public String getDuration() { return duration; }
         public String getArtist() { return artist; }
+        public String getFilename() { return filename; }
         
         @Override
         public String toString() {
