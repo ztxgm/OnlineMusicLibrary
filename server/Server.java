@@ -6,173 +6,20 @@ import java.awt.image.BufferedImage;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Font;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import org.json.*;
 
-// Класс для представления записи о музыке
-class MusicRecord {
-    private String id;
-    private String title;
-    private String duration;
-    private String artist;
-    private String audioFilename;
-    private String coverFilename;
-    
-    public MusicRecord() {}
-    
-    public MusicRecord(String id, String title, String duration, String artist, 
-                      String audioFilename, String coverFilename) {
-        this.id = id;
-        this.title = title;
-        this.duration = duration;
-        this.artist = artist;
-        this.audioFilename = audioFilename;
-        this.coverFilename = coverFilename;
-    }
-    
-    // Конструктор из JSONObject
-    public MusicRecord(JSONObject json) {
-        this.id = json.getString("id");
-        this.title = json.getString("title");
-        this.duration = json.getString("duration");
-        this.artist = json.getString("artist");
-        this.audioFilename = json.getString("audioFilename");
-        this.coverFilename = json.optString("coverFilename", "-");
-    }
-    
-    // Преобразование в JSONObject
-    public JSONObject toJson() {
-        JSONObject json = new JSONObject();
-        json.put("id", id);
-        json.put("title", title);
-        json.put("duration", duration);
-        json.put("artist", artist);
-        json.put("audioFilename", audioFilename);
-        json.put("coverFilename", coverFilename);
-        return json;
-    }
-    
-    // Геттеры и сеттеры
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
-    
-    public String getDuration() { return duration; }
-    public void setDuration(String duration) { this.duration = duration; }
-    
-    public String getArtist() { return artist; }
-    public void setArtist(String artist) { this.artist = artist; }
-    
-    public String getAudioFilename() { return audioFilename; }
-    public void setAudioFilename(String audioFilename) { this.audioFilename = audioFilename; }
-    
-    public String getCoverFilename() { return coverFilename; }
-    public void setCoverFilename(String coverFilename) { this.coverFilename = coverFilename; }
-    
-    // Метод для преобразования в старый формат (для совместимости с клиентом)
-    public String toOldFormat() {
-        return id + ":" + title + ":" + duration + ":" + artist + ":" + audioFilename + ":" + coverFilename;
-    }
-}
-
-// Класс для работы с базой данных на JSON
-class MusicDatabase {
-    private static final String DB_FILE = "music_db.json";
-    private List<MusicRecord> records;
-    
-    public MusicDatabase() throws IOException {
-        this.records = new ArrayList<>();
-        loadFromFile();
-    }
-    
-    private void loadFromFile() throws IOException {
-        File file = new File(DB_FILE);
-        if (!file.exists()) {
-            throw new FileNotFoundException("Файл базы данных JSON не найден: " + DB_FILE);
-        }
-        
-        records.clear();
-        try (BufferedReader reader = new BufferedReader(new FileReader(DB_FILE))) {
-            StringBuilder jsonContent = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                jsonContent.append(line);
-            }
-            
-            JSONArray jsonArray = new JSONArray(jsonContent.toString());
-            for (int i = 0; i < jsonArray.length(); i++) {
-                JSONObject jsonRecord = jsonArray.getJSONObject(i);
-                MusicRecord record = new MusicRecord(jsonRecord);
-                records.add(record);
-            }
-        } catch (org.json.JSONException e) {
-            throw new IOException("Ошибка парсинга JSON файла: " + e.getMessage());
-        }
-        System.out.println("База данных JSON загружена. Записей: " + records.size());
-    }
-    
-    public List<String> getAllRecordsAsStrings() {
-        List<String> result = new ArrayList<>();
-        for (MusicRecord record : records) {
-            result.add(record.toOldFormat());
-        }
-        return result;
-    }
-    
-    public String[] getFileInfo(String id) {
-        for (MusicRecord record : records) {
-            if (record.getId().equals(id)) {
-                return new String[]{record.getAudioFilename(), record.getCoverFilename()};
-            }
-        }
-        return null;
-    }
-    
-    // Получение аудиофайла по ID
-    public String getAudioFilenameById(String id) {
-        for (MusicRecord record : records) {
-            if (record.getId().equals(id)) {
-                return record.getAudioFilename();
-            }
-        }
-        return null;
-    }
-    
-    public void reload() throws IOException {
-        loadFromFile();
-    }
-}
-
-// Основной класс сервера
 public class Server {
     private static final int PORT = 12345;
     private static final String MUSIC_DIR = "music";
     private static final String COVERS_DIR = "covers";
-    private static MusicDatabase musicDatabase;
+    private static final String DB_FILE = "music_db.json";
+    private static List<MusicRecord> musicData = new ArrayList<>();
     
     public static void main(String[] args) {
-        // Создаем необходимые директории
         new File(MUSIC_DIR).mkdir();
         new File(COVERS_DIR).mkdir();
         
-        try {
-            musicDatabase = new MusicDatabase();
-        } catch (FileNotFoundException e) {
-            System.err.println("ФАТАЛЬНАЯ ОШИБКА: Файл базы данных JSON не найден!");
-            System.err.println("Создайте файл " + new File("music_db.json").getAbsolutePath() + " с данными о музыке.");
-            System.err.println("Формат JSON массива объектов с полями: id, title, duration, artist, audioFilename, coverFilename");
-            System.err.println("Пример содержимого:");
-            System.err.println("[\n  {\n    \"id\": \"1\",\n    \"title\": \"Bohemian Rhapsody\",\n    \"duration\": \"6:07\",\n    \"artist\": \"Queen\",\n    \"audioFilename\": \"queen_bohemian.mp3\",\n    \"coverFilename\": \"-\"\n  }\n]");
-            System.exit(1);
-            return;
-        } catch (IOException e) {
-            System.err.println("ФАТАЛЬНАЯ ОШИБКА: Не удалось загрузить базу данных JSON!");
-            e.printStackTrace();
-            System.exit(1);
-            return;
-        }
+        loadDatabase();
         
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Сервер запущен на порту " + PORT);
@@ -187,8 +34,107 @@ public class Server {
         }
     }
     
+    private static void loadDatabase() {
+        try {
+            File file = new File(DB_FILE);
+            if (!file.exists()) {
+                createSampleDatabase();
+            }
+            
+            musicData.clear();
+            try (BufferedReader reader = new BufferedReader(new FileReader(DB_FILE))) {
+                StringBuilder jsonContent = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    jsonContent.append(line);
+                }
+                
+                JSONArray jsonArray = new JSONArray(jsonContent.toString());
+                for (int i = 0; i < jsonArray.length(); i++) {
+                    JSONObject jsonRecord = jsonArray.getJSONObject(i);
+                    MusicRecord record = new MusicRecord(
+                        jsonRecord.getString("id"),
+                        jsonRecord.getString("title"),
+                        jsonRecord.getString("duration"),
+                        jsonRecord.getString("artist"),
+                        jsonRecord.getString("audioFilename"),
+                        jsonRecord.optString("coverFilename", "-")
+                    );
+                    musicData.add(record);
+                }
+            }
+            System.out.println("База данных загружена. Записей: " + musicData.size());
+        } catch (IOException e) {
+            System.err.println("Ошибка чтения базы данных: " + e.getMessage());
+            System.exit(1);
+        } catch (JSONException e) {
+            System.err.println("Ошибка парсинга JSON: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+    
+    private static void createSampleDatabase() throws IOException {
+        JSONArray jsonArray = new JSONArray();
+        
+        JSONObject[] sampleRecords = {
+            new JSONObject()
+                .put("id", "1")
+                .put("title", "Chippin' in")
+                .put("duration", "3:34")
+                .put("artist", "Samurai")
+                .put("audioFilename", "Chippin' in.mp3")
+                .put("coverFilename", "1.png"),
+            new JSONObject()
+                .put("id", "2")
+                .put("title", "Never Fade Away")
+                .put("duration", "3:10")
+                .put("artist", "Samurai")
+                .put("audioFilename", "Never Fade Away.mp3")
+                .put("coverFilename", "2.png"),
+            new JSONObject()
+                .put("id", "3")
+                .put("title", "Black Dog")
+                .put("duration", "4:23")
+                .put("artist", "Samurai")
+                .put("audioFilename", "Black Dog.mp3")
+                .put("coverFilename", "4.png"),
+            new JSONObject()
+                .put("id", "4")
+                .put("title", "The Ballad of Buck Ravers")
+                .put("duration", "4:28")
+                .put("artist", "Samurai")
+                .put("audioFilename", "The Ballad of Buck Ravers.mp3")
+                .put("coverFilename", "5.png"),
+            new JSONObject()
+                .put("id", "5")
+                .put("title", "A Like Supreme")
+                .put("duration", "3:49")
+                .put("artist", "Samurai")
+                .put("audioFilename", "A Like Supreme.mp3")
+                .put("coverFilename", "3.png"),
+            new JSONObject()
+                .put("id", "6")
+                .put("title", "Afraid To Shoot Strangers")
+                .put("duration", "6:56")
+                .put("artist", "Iron Maiden")
+                .put("audioFilename", "afd.mp3")
+                .put("coverFilename", "-")
+        };
+        
+        for (JSONObject record : sampleRecords) {
+            jsonArray.put(record);
+        }
+        
+        try (FileWriter file = new FileWriter(DB_FILE)) {
+            file.write(jsonArray.toString(2));
+            System.out.println("Создана новая база данных с тестовыми записями");
+        }
+    }
+    
     private static class ClientHandler extends Thread {
         private Socket socket;
+        private BufferedReader in;
+        private PrintWriter out;
         
         public ClientHandler(Socket socket) {
             this.socket = socket;
@@ -196,56 +142,55 @@ public class Server {
         
         @Override
         public void run() {
-            try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+            try {
+                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                out = new PrintWriter(socket.getOutputStream(), true);
                 
                 String request;
                 while ((request = in.readLine()) != null) {
-                    System.out.println("Получен запрос: " + request);
+                    System.out.println("Получен JSON запрос: " + request);
                     
-                    if (request.equals("GET_ALL")) {
-                        for (String record : musicDatabase.getAllRecordsAsStrings()) {
-                            out.println(record);
+                    try {
+                        JSONObject jsonRequest = new JSONObject(request);
+                        String command = jsonRequest.getString("command");
+                        
+                        JSONObject response = new JSONObject();
+                        
+                        switch (command) {
+                            case "GET_ALL":
+                                handleGetAll(response);
+                                break;
+                                
+                            case "GET_FILE_BY_ID":
+                                handleGetFileById(jsonRequest.getString("id"));
+                                return; // После отправки файла закрываем соединение
+                                
+                            case "GET_COVER":
+                                handleGetCover(jsonRequest.getString("coverFilename"));
+                                return; // После отправки файла закрываем соединение
+                                
+                            case "GET_FILE_INFO":
+                                handleGetFileInfo(jsonRequest.getString("id"), response);
+                                break;
+                                
+                            case "RELOAD":
+                                loadDatabase();
+                                response.put("status", "OK");
+                                response.put("message", "База данных перезагружена");
+                                break;
+                                
+                            default:
+                                response.put("status", "ERROR");
+                                response.put("message", "Неизвестная команда: " + command);
                         }
-                        out.println("END");
-                    } else if (request.startsWith("GET_FILE_BY_ID:")) {
-                        // Получаем файл по ID: находим имя файла в базе и отправляем его
-                        String id = request.substring(15);
-                        String audioFilename = musicDatabase.getAudioFilenameById(id);
-                        if (audioFilename != null) {
-                            // Отправляем файл с именем, которое нашли в базе
-                            sendFile(MUSIC_DIR, audioFilename, socket.getOutputStream());
-                        } else {
-                            out.println("ERROR:File not found for ID " + id);
-                        }
-                        break;
-                    } else if (request.startsWith("GET_COVER:")) {
-                        String coverFilename = request.substring(10);
-                        sendCover(coverFilename, socket.getOutputStream());
-                        break;
-                    } else if (request.startsWith("GET_FILE_INFO:")) {
-                        String id = request.substring(14);
-                        String[] fileInfo = musicDatabase.getFileInfo(id);
-                        if (fileInfo != null) {
-                            // Возвращаем в формате: <filename>:<cover>
-                            out.println(fileInfo[0] + ":" + fileInfo[1]);
-                        } else {
-                            out.println("ERROR:File not found");
-                        }
-                    } else if (request.equals("RELOAD")) {
-                        try {
-                            musicDatabase.reload();
-                            out.println("OK");
-                        } catch (IOException e) {
-                            out.println("ERROR:Failed to reload database: " + e.getMessage());
-                        }
-                    } else if (request.startsWith("GET_FILE:")) {
-                        // Старая команда для совместимости (по имени файла)
-                        String filename = request.substring(9);
-                        sendFile(MUSIC_DIR, filename, socket.getOutputStream());
-                        break;
-                    } else {
-                        out.println("ERROR: Unknown command");
+                        
+                        out.println(response.toString());
+                        
+                    } catch (JSONException e) {
+                        JSONObject errorResponse = new JSONObject();
+                        errorResponse.put("status", "ERROR");
+                        errorResponse.put("message", "Некорректный JSON запрос: " + e.getMessage());
+                        out.println(errorResponse.toString());
                     }
                 }
             } catch (IOException e) {
@@ -259,57 +204,113 @@ public class Server {
             }
         }
         
-        private void sendFile(String directory, String filename, OutputStream socketOut) {
+        private void handleGetAll(JSONObject response) {
+            JSONArray tracksArray = new JSONArray();
+            
+            for (MusicRecord record : musicData) {
+                JSONObject trackJson = new JSONObject()
+                    .put("id", record.getId())
+                    .put("title", record.getTitle())
+                    .put("duration", record.getDuration())
+                    .put("artist", record.getArtist())
+                    .put("audioFilename", record.getAudioFilename())
+                    .put("coverFilename", record.getCoverFilename());
+                tracksArray.put(trackJson);
+            }
+            
+            response.put("status", "OK");
+            response.put("data", tracksArray);
+        }
+        
+        private void handleGetFileInfo(String id, JSONObject response) {
+            for (MusicRecord record : musicData) {
+                if (record.getId().equals(id)) {
+                    response.put("status", "OK");
+                    response.put("audioFilename", record.getAudioFilename());
+                    response.put("coverFilename", record.getCoverFilename());
+                    return;
+                }
+            }
+            
+            response.put("status", "ERROR");
+            response.put("message", "Запись с ID " + id + " не найдена");
+        }
+        
+        private void handleGetFileById(String id) {
             try {
-                File file = new File(directory + File.separator + filename);
-                if (!file.exists()) {
-                    System.out.println("Файл не найден: " + file.getAbsolutePath());
-                    PrintWriter out = new PrintWriter(socketOut, true);
-                    out.println("ERROR:File not found: " + filename);
+                String audioFilename = null;
+                for (MusicRecord record : musicData) {
+                    if (record.getId().equals(id)) {
+                        audioFilename = record.getAudioFilename();
+                        break;
+                    }
+                }
+                
+                if (audioFilename == null) {
+                    JSONObject errorResponse = new JSONObject();
+                    errorResponse.put("status", "ERROR");
+                    errorResponse.put("message", "Файл с ID " + id + " не найден");
+                    out.println(errorResponse.toString());
                     return;
                 }
                 
-                System.out.println("Отправка файла: " + file.getName() + " размер: " + file.length());
+                sendFile(MUSIC_DIR, audioFilename);
                 
-                PrintWriter out = new PrintWriter(socketOut, true);
-                out.println("FILE_SIZE:" + file.length());
-                
-                try (FileInputStream fis = new FileInputStream(file);
-                     BufferedInputStream bis = new BufferedInputStream(fis)) {
-                    
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    long totalSent = 0;
-                    
-                    while ((bytesRead = bis.read(buffer)) != -1) {
-                        socketOut.write(buffer, 0, bytesRead);
-                        totalSent += bytesRead;
-                    }
-                    socketOut.flush();
-                    System.out.println("Файл отправлен успешно. Отправлено: " + totalSent + " байт");
-                }
-                
-            } catch (IOException e) {
+            } catch (Exception e) {
                 System.out.println("Ошибка при отправке файла: " + e.getMessage());
             }
         }
         
-        private void sendCover(String coverFilename, OutputStream socketOut) {
+        private void handleGetCover(String coverFilename) {
             try {
-                File coverFile = new File(COVERS_DIR + File.separator + coverFilename);
-                
-                if (coverFile.exists()) {
-                    sendFile(COVERS_DIR, coverFilename, socketOut);
+                if (coverFilename == null || coverFilename.equals("-")) {
+                    createAndSendDefaultCover();
                 } else {
-                    createAndSendDefaultCover(socketOut);
+                    sendFile(COVERS_DIR, coverFilename);
                 }
-                
             } catch (Exception e) {
                 System.out.println("Ошибка при отправке обложки: " + e.getMessage());
             }
         }
         
-        private void createAndSendDefaultCover(OutputStream socketOut) throws IOException {
+        private void sendFile(String directory, String filename) throws IOException {
+            File file = new File(directory + File.separator + filename);
+            if (!file.exists()) {
+                JSONObject errorResponse = new JSONObject();
+                errorResponse.put("status", "ERROR");
+                errorResponse.put("message", "Файл не найден: " + filename);
+                out.println(errorResponse.toString());
+                return;
+            }
+            
+            System.out.println("Отправка файла: " + file.getName() + " размер: " + file.length());
+            
+            // Отправляем JSON с информацией о файле
+            JSONObject fileInfo = new JSONObject();
+            fileInfo.put("status", "FILE");
+            fileInfo.put("filename", filename);
+            fileInfo.put("size", file.length());
+            out.println(fileInfo.toString());
+            
+            // Отправляем сам файл
+            try (FileInputStream fis = new FileInputStream(file);
+                 BufferedInputStream bis = new BufferedInputStream(fis);
+                 OutputStream socketOut = socket.getOutputStream()) {
+                
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                long totalSent = 0;
+                
+                while ((bytesRead = bis.read(buffer)) != -1) {
+                    socketOut.write(buffer, 0, bytesRead);
+                    totalSent += bytesRead;
+                }
+                socketOut.flush();
+                System.out.println("Файл отправлен успешно. Отправлено: " + totalSent + " байт");
+            }
+        }
+        
+        private void createAndSendDefaultCover() throws IOException {
             int width = 300;
             int height = 300;
             BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -340,10 +341,43 @@ public class Server {
             ImageIO.write(image, "png", baos);
             byte[] imageData = baos.toByteArray();
             
-            PrintWriter out = new PrintWriter(socketOut, true);
-            out.println("FILE_SIZE:" + imageData.length);
+            // Отправляем JSON с информацией о файле
+            JSONObject fileInfo = new JSONObject();
+            fileInfo.put("status", "FILE");
+            fileInfo.put("filename", "default_cover.png");
+            fileInfo.put("size", imageData.length);
+            out.println(fileInfo.toString());
+            
+            // Отправляем изображение
+            OutputStream socketOut = socket.getOutputStream();
             socketOut.write(imageData, 0, imageData.length);
             socketOut.flush();
         }
+    }
+    
+    private static class MusicRecord {
+        private String id;
+        private String title;
+        private String duration;
+        private String artist;
+        private String audioFilename;
+        private String coverFilename;
+        
+        public MusicRecord(String id, String title, String duration, String artist,
+                          String audioFilename, String coverFilename) {
+            this.id = id;
+            this.title = title;
+            this.duration = duration;
+            this.artist = artist;
+            this.audioFilename = audioFilename;
+            this.coverFilename = coverFilename;
+        }
+        
+        public String getId() { return id; }
+        public String getTitle() { return title; }
+        public String getDuration() { return duration; }
+        public String getArtist() { return artist; }
+        public String getAudioFilename() { return audioFilename; }
+        public String getCoverFilename() { return coverFilename; }
     }
 }

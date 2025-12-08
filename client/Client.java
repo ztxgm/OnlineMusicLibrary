@@ -6,6 +6,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+import org.json.*;
 import java.io.*;
 import java.net.*;
 
@@ -177,12 +178,26 @@ public class Client extends Application {
         }
         
         try {
-            out.println("GET_ALL");
-            trackList.clear();
+            // Отправляем JSON запрос
+            JSONObject request = new JSONObject();
+            request.put("command", "GET_ALL");
+            out.println(request.toString());
             
-            String response;
-            while (!(response = in.readLine()).equals("END")) {
-                MusicTrack track = MusicTrack.fromString(response);
+            // Получаем JSON ответ
+            String response = in.readLine();
+            JSONObject jsonResponse = new JSONObject(response);
+            
+            if (!jsonResponse.getString("status").equals("OK")) {
+                showAlert("Ошибка", "Ошибка загрузки треков: " + jsonResponse.getString("message"));
+                return;
+            }
+            
+            trackList.clear();
+            JSONArray tracksArray = jsonResponse.getJSONArray("data");
+            
+            for (int i = 0; i < tracksArray.length(); i++) {
+                JSONObject trackJson = tracksArray.getJSONObject(i);
+                MusicTrack track = MusicTrack.fromJson(trackJson);
                 if (track != null) {
                     trackList.add(track);
                 }
@@ -191,6 +206,8 @@ public class Client extends Application {
         } catch (IOException e) {
             statusLabel.setText("Ошибка загрузки данных");
             showAlert("Ошибка", "Не удалось загрузить данные с сервера");
+        } catch (JSONException e) {
+            showAlert("Ошибка", "Некорректный ответ от сервера: " + e.getMessage());
         }
     }
     
@@ -260,17 +277,20 @@ public class Client extends Application {
             this.cover = cover;
         }
         
-        public static MusicTrack fromString(String str) {
+        public static MusicTrack fromJson(JSONObject json) {
             try {
-                String[] parts = str.split(":");
-                if (parts.length >= 6) {
-                    String cover = parts.length >= 7 ? parts[6] : "-";
-                    return new MusicTrack(parts[0], parts[1], parts[2] + ":" + parts[3], parts[4], parts[5], cover);
-                }
+                return new MusicTrack(
+                    json.getString("id"),
+                    json.getString("title"),
+                    json.getString("duration"),
+                    json.getString("artist"),
+                    json.getString("audioFilename"),
+                    json.optString("coverFilename", "-")
+                );
             } catch (Exception e) {
                 e.printStackTrace();
+                return null;
             }
-            return null;
         }
         
         public String getId() { return id; }

@@ -11,6 +11,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.beans.value.ChangeListener;
 import javafx.scene.input.ScrollEvent;
+import org.json.*;
 import java.io.*;
 import java.net.Socket;
 import java.util.List;
@@ -240,42 +241,34 @@ public class AudioPlayerWindow {
     private void loadAndPlayTrack() {
         new Thread(() -> {
             try {
-                Socket infoSocket = new Socket(serverAddress, serverPort);
-                PrintWriter infoOut = new PrintWriter(infoSocket.getOutputStream(), true);
-                BufferedReader infoIn = new BufferedReader(new InputStreamReader(infoSocket.getInputStream()));
+                Socket socket = new Socket(serverAddress, serverPort);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 
-                infoOut.println("GET_FILE_INFO:" + currentTrack.getId());
-                String response = infoIn.readLine();
-                infoSocket.close();
+                // Отправляем запрос на получение аудиофайла по ID
+                JSONObject request = new JSONObject();
+                request.put("command", "GET_FILE_BY_ID");
+                request.put("id", currentTrack.getId());
+                out.println(request.toString());
                 
-                if (response.startsWith("ERROR:")) {
-                    Platform.runLater(() -> showError("Файл не найден на сервере"));
+                // Получаем JSON ответ о файле
+                String response = in.readLine();
+                JSONObject jsonResponse = new JSONObject(response);
+                
+                if (!jsonResponse.getString("status").equals("FILE")) {
+                    Platform.runLater(() -> showError("Ошибка получения файла: " + 
+                        (jsonResponse.has("message") ? jsonResponse.getString("message") : "Неизвестная ошибка")));
+                    socket.close();
                     return;
                 }
                 
-                String[] fileInfo = response.split(":");
-                String audioFilename = fileInfo[0];
-                
-                Socket audioSocket = new Socket(serverAddress, serverPort);
-                PrintWriter audioOut = new PrintWriter(audioSocket.getOutputStream(), true);
-                BufferedReader audioIn = new BufferedReader(new InputStreamReader(audioSocket.getInputStream()));
-                
-                audioOut.println("GET_FILE:" + audioFilename);
-                
-                String fileResponse = audioIn.readLine();
-                if (!fileResponse.startsWith("FILE_SIZE:")) {
-                    Platform.runLater(() -> showError("Ошибка получения файла: " + fileResponse));
-                    audioSocket.close();
-                    return;
-                }
-                
-                long fileSize = Long.parseLong(fileResponse.substring(10));
+                long fileSize = jsonResponse.getLong("size");
                 
                 File tempFile = File.createTempFile("stream_", ".mp3");
                 tempFile.deleteOnExit();
                 
                 try (FileOutputStream fos = new FileOutputStream(tempFile);
-                     InputStream is = audioSocket.getInputStream()) {
+                     InputStream is = socket.getInputStream()) {
                     
                     byte[] buffer = new byte[8192];
                     int bytesRead;
@@ -288,7 +281,7 @@ public class AudioPlayerWindow {
                     }
                 }
                 
-                audioSocket.close();
+                socket.close();
                 
                 Platform.runLater(() -> {
                     try {
@@ -351,26 +344,33 @@ public class AudioPlayerWindow {
     private void loadCoverFile(String coverFilename) {
         new Thread(() -> {
             try {
-                Socket coverSocket = new Socket(serverAddress, serverPort);
-                PrintWriter coverOut = new PrintWriter(coverSocket.getOutputStream(), true);
-                BufferedReader coverIn = new BufferedReader(new InputStreamReader(coverSocket.getInputStream()));
+                Socket socket = new Socket(serverAddress, serverPort);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 
-                coverOut.println("GET_COVER:" + coverFilename);
+                // Отправляем запрос на получение обложки
+                JSONObject request = new JSONObject();
+                request.put("command", "GET_COVER");
+                request.put("coverFilename", coverFilename);
+                out.println(request.toString());
                 
-                String response = coverIn.readLine();
-                if (!response.startsWith("FILE_SIZE:")) {
+                // Получаем JSON ответ о файле
+                String response = in.readLine();
+                JSONObject jsonResponse = new JSONObject(response);
+                
+                if (!jsonResponse.getString("status").equals("FILE")) {
                     Platform.runLater(() -> loadDefaultCover());
-                    coverSocket.close();
+                    socket.close();
                     return;
                 }
                 
-                long fileSize = Long.parseLong(response.substring(10));
+                long fileSize = jsonResponse.getLong("size");
                 
                 File tempFile = File.createTempFile("cover_", ".png");
                 tempFile.deleteOnExit();
                 
                 try (FileOutputStream fos = new FileOutputStream(tempFile);
-                     InputStream is = coverSocket.getInputStream()) {
+                     InputStream is = socket.getInputStream()) {
                     
                     byte[] buffer = new byte[8192];
                     int bytesRead;
@@ -383,7 +383,7 @@ public class AudioPlayerWindow {
                     }
                 }
                 
-                coverSocket.close();
+                socket.close();
                 
                 Platform.runLater(() -> {
                     try {
