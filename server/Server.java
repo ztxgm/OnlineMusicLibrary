@@ -16,21 +16,30 @@ public class Server {
     private static List<MusicRecord> musicData = new ArrayList<>();
     
     public static void main(String[] args) {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Logger.info("Сервер завершает работу...");
+            Logger.close();
+        }));
+        
+        Logger.info("Запуск сервера...");
+        
         new File(MUSIC_DIR).mkdir();
         new File(COVERS_DIR).mkdir();
         
         loadDatabase();
         
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            System.out.println("Сервер запущен на порту " + PORT);
+            Logger.info("Сервер запущен на порту " + PORT);
             
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("Новое подключение: " + clientSocket.getInetAddress());
+                Logger.info("Новое подключение: " + clientSocket.getInetAddress());
                 new ClientHandler(clientSocket).start();
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            Logger.error("Ошибка в основном цикле сервера", e);
+        } finally {
+            Logger.close();
         }
     }
     
@@ -38,7 +47,7 @@ public class Server {
         try {
             File file = new File(DB_FILE);
             if (!file.exists()) {
-                System.err.println("База данных отсутствует!");
+                Logger.error("База данных отсутствует!");
                 System.exit(1);
             }
             
@@ -64,12 +73,12 @@ public class Server {
                     musicData.add(record);
                 }
             }
-            System.out.println("База данных загружена. Записей: " + musicData.size());
+            Logger.info("База данных загружена. Записей: " + musicData.size());
         } catch (IOException e) {
-            System.err.println("Ошибка чтения базы данных: " + e.getMessage());
+            Logger.error("Ошибка чтения базы данных: " + e.getMessage(), e);
             System.exit(1);
         } catch (JSONException e) {
-            System.err.println("Ошибка парсинга JSON: " + e.getMessage());
+            Logger.error("Ошибка парсинга JSON: " + e.getMessage(), e);
             System.exit(1);
         }
     }
@@ -91,7 +100,7 @@ public class Server {
                 
                 String request;
                 while ((request = in.readLine()) != null) {
-                    System.out.println("Получен JSON запрос: " + request);
+                    Logger.debug("Получен JSON запрос: " + request);
                     
                     try {
                         JSONObject jsonRequest = new JSONObject(request);
@@ -106,11 +115,11 @@ public class Server {
                                 
                             case "GET_FILE_BY_ID":
                                 handleGetFileById(jsonRequest.getString("id"));
-                                return; // После отправки файла закрываем соединение
+                                return;
                                 
                             case "GET_COVER":
                                 handleGetCover(jsonRequest.getString("coverFilename"));
-                                return; // После отправки файла закрываем соединение
+                                return;
                                 
                             case "GET_FILE_INFO":
                                 handleGetFileInfo(jsonRequest.getString("id"), response);
@@ -128,21 +137,24 @@ public class Server {
                         }
                         
                         out.println(response.toString());
+                        Logger.debug("Отправлен JSON ответ: " + response.toString());
                         
                     } catch (JSONException e) {
                         JSONObject errorResponse = new JSONObject();
                         errorResponse.put("status", "ERROR");
                         errorResponse.put("message", "Некорректный JSON запрос: " + e.getMessage());
                         out.println(errorResponse.toString());
+                        Logger.warning("Некорректный JSON запрос: " + e.getMessage());
                     }
                 }
             } catch (IOException e) {
-                System.out.println("Ошибка при обработке клиента: " + e.getMessage());
+                Logger.error("Ошибка при обработке клиента: " + e.getMessage(), e);
             } finally {
                 try {
                     socket.close();
+                    Logger.debug("Соединение с клиентом закрыто");
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Logger.error("Ошибка при закрытии сокета", e);
                 }
             }
         }
@@ -163,6 +175,7 @@ public class Server {
             
             response.put("status", "OK");
             response.put("data", tracksArray);
+            Logger.debug("Обработан запрос GET_ALL, возвращено " + tracksArray.length() + " записей");
         }
         
         private void handleGetFileInfo(String id, JSONObject response) {
@@ -171,12 +184,14 @@ public class Server {
                     response.put("status", "OK");
                     response.put("audioFilename", record.getAudioFilename());
                     response.put("coverFilename", record.getCoverFilename());
+                    Logger.debug("Найдена информация о файле с ID: " + id);
                     return;
                 }
             }
             
             response.put("status", "ERROR");
             response.put("message", "Запись с ID " + id + " не найдена");
+            Logger.warning("Запись с ID " + id + " не найдена");
         }
         
         private void handleGetFileById(String id) {
@@ -194,13 +209,14 @@ public class Server {
                     errorResponse.put("status", "ERROR");
                     errorResponse.put("message", "Файл с ID " + id + " не найден");
                     out.println(errorResponse.toString());
+                    Logger.warning("Файл с ID " + id + " не найден");
                     return;
                 }
                 
                 sendFile(MUSIC_DIR, audioFilename);
                 
             } catch (Exception e) {
-                System.out.println("Ошибка при отправке файла: " + e.getMessage());
+                Logger.error("Ошибка при отправке файла", e);
             }
         }
         
@@ -212,7 +228,7 @@ public class Server {
                     sendFile(COVERS_DIR, coverFilename);
                 }
             } catch (Exception e) {
-                System.out.println("Ошибка при отправке обложки: " + e.getMessage());
+                Logger.error("Ошибка при отправке обложки", e);
             }
         }
         
@@ -223,19 +239,18 @@ public class Server {
                 errorResponse.put("status", "ERROR");
                 errorResponse.put("message", "Файл не найден: " + filename);
                 out.println(errorResponse.toString());
+                Logger.warning("Файл не найден: " + filename);
                 return;
             }
             
-            System.out.println("Отправка файла: " + file.getName() + " размер: " + file.length());
+            Logger.info("Отправка файла: " + file.getName() + " размер: " + file.length() + " байт");
             
-            // Отправляем JSON с информацией о файле
             JSONObject fileInfo = new JSONObject();
             fileInfo.put("status", "FILE");
             fileInfo.put("filename", filename);
             fileInfo.put("size", file.length());
             out.println(fileInfo.toString());
             
-            // Отправляем сам файл
             try (FileInputStream fis = new FileInputStream(file);
                  BufferedInputStream bis = new BufferedInputStream(fis);
                  OutputStream socketOut = socket.getOutputStream()) {
@@ -249,11 +264,13 @@ public class Server {
                     totalSent += bytesRead;
                 }
                 socketOut.flush();
-                System.out.println("Файл отправлен успешно. Отправлено: " + totalSent + " байт");
+                Logger.info("Файл отправлен успешно. Отправлено: " + totalSent + " байт");
             }
         }
         
         private void createAndSendDefaultCover() throws IOException {
+            Logger.debug("Создание обложки по умолчанию");
+            
             int width = 300;
             int height = 300;
             BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -284,17 +301,16 @@ public class Server {
             ImageIO.write(image, "png", baos);
             byte[] imageData = baos.toByteArray();
             
-            // Отправляем JSON с информацией о файле
             JSONObject fileInfo = new JSONObject();
             fileInfo.put("status", "FILE");
             fileInfo.put("filename", "default_cover.png");
             fileInfo.put("size", imageData.length);
             out.println(fileInfo.toString());
             
-            // Отправляем изображение
             OutputStream socketOut = socket.getOutputStream();
             socketOut.write(imageData, 0, imageData.length);
             socketOut.flush();
+            Logger.info("Обложка по умолчанию отправлена. Размер: " + imageData.length + " байт");
         }
     }
     
