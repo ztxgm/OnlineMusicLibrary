@@ -38,7 +38,8 @@ public class Server {
         try {
             File file = new File(DB_FILE);
             if (!file.exists()) {
-                createSampleDatabase();
+                System.err.println("База данных отсутствует!");
+                System.exit(1);
             }
             
             musicData.clear();
@@ -72,65 +73,7 @@ public class Server {
             System.exit(1);
         }
     }
-    
-    private static void createSampleDatabase() throws IOException {
-        JSONArray jsonArray = new JSONArray();
-        
-        JSONObject[] sampleRecords = {
-            new JSONObject()
-                .put("id", "1")
-                .put("title", "Chippin' in")
-                .put("duration", "3:34")
-                .put("artist", "Samurai")
-                .put("audioFilename", "Chippin' in.mp3")
-                .put("coverFilename", "1.png"),
-            new JSONObject()
-                .put("id", "2")
-                .put("title", "Never Fade Away")
-                .put("duration", "3:10")
-                .put("artist", "Samurai")
-                .put("audioFilename", "Never Fade Away.mp3")
-                .put("coverFilename", "2.png"),
-            new JSONObject()
-                .put("id", "3")
-                .put("title", "Black Dog")
-                .put("duration", "4:23")
-                .put("artist", "Samurai")
-                .put("audioFilename", "Black Dog.mp3")
-                .put("coverFilename", "4.png"),
-            new JSONObject()
-                .put("id", "4")
-                .put("title", "The Ballad of Buck Ravers")
-                .put("duration", "4:28")
-                .put("artist", "Samurai")
-                .put("audioFilename", "The Ballad of Buck Ravers.mp3")
-                .put("coverFilename", "5.png"),
-            new JSONObject()
-                .put("id", "5")
-                .put("title", "A Like Supreme")
-                .put("duration", "3:49")
-                .put("artist", "Samurai")
-                .put("audioFilename", "A Like Supreme.mp3")
-                .put("coverFilename", "3.png"),
-            new JSONObject()
-                .put("id", "6")
-                .put("title", "Afraid To Shoot Strangers")
-                .put("duration", "6:56")
-                .put("artist", "Iron Maiden")
-                .put("audioFilename", "afd.mp3")
-                .put("coverFilename", "-")
-        };
-        
-        for (JSONObject record : sampleRecords) {
-            jsonArray.put(record);
-        }
-        
-        try (FileWriter file = new FileWriter(DB_FILE)) {
-            file.write(jsonArray.toString(2));
-            System.out.println("Создана новая база данных с тестовыми записями");
-        }
-    }
-    
+       
     private static class ClientHandler extends Thread {
         private Socket socket;
         private BufferedReader in;
