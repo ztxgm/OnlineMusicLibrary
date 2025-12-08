@@ -6,19 +6,173 @@ import java.awt.image.BufferedImage;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Font;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
+// Класс для представления записи о музыке
+class MusicRecord {
+    private String id;
+    private String title;
+    private String duration;
+    private String artist;
+    private String audioFilename;
+    private String coverFilename;
+    
+    public MusicRecord() {}
+    
+    public MusicRecord(String id, String title, String duration, String artist, 
+                      String audioFilename, String coverFilename) {
+        this.id = id;
+        this.title = title;
+        this.duration = duration;
+        this.artist = artist;
+        this.audioFilename = audioFilename;
+        this.coverFilename = coverFilename;
+    }
+    
+    // Конструктор из JSONObject
+    public MusicRecord(JSONObject json) {
+        this.id = json.getString("id");
+        this.title = json.getString("title");
+        this.duration = json.getString("duration");
+        this.artist = json.getString("artist");
+        this.audioFilename = json.getString("audioFilename");
+        this.coverFilename = json.optString("coverFilename", "-");
+    }
+    
+    // Преобразование в JSONObject
+    public JSONObject toJson() {
+        JSONObject json = new JSONObject();
+        json.put("id", id);
+        json.put("title", title);
+        json.put("duration", duration);
+        json.put("artist", artist);
+        json.put("audioFilename", audioFilename);
+        json.put("coverFilename", coverFilename);
+        return json;
+    }
+    
+    // Геттеры и сеттеры
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+    
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    
+    public String getDuration() { return duration; }
+    public void setDuration(String duration) { this.duration = duration; }
+    
+    public String getArtist() { return artist; }
+    public void setArtist(String artist) { this.artist = artist; }
+    
+    public String getAudioFilename() { return audioFilename; }
+    public void setAudioFilename(String audioFilename) { this.audioFilename = audioFilename; }
+    
+    public String getCoverFilename() { return coverFilename; }
+    public void setCoverFilename(String coverFilename) { this.coverFilename = coverFilename; }
+    
+    // Метод для преобразования в старый формат (для совместимости с клиентом)
+    public String toOldFormat() {
+        return id + ":" + title + ":" + duration + ":" + artist + ":" + audioFilename + ":" + coverFilename;
+    }
+}
+
+// Класс для работы с базой данных на JSON
+class MusicDatabase {
+    private static final String DB_FILE = "music_db.json";
+    private List<MusicRecord> records;
+    
+    public MusicDatabase() throws IOException {
+        this.records = new ArrayList<>();
+        loadFromFile();
+    }
+    
+    private void loadFromFile() throws IOException {
+        File file = new File(DB_FILE);
+        if (!file.exists()) {
+            throw new FileNotFoundException("Файл базы данных JSON не найден: " + DB_FILE);
+        }
+        
+        records.clear();
+        try (BufferedReader reader = new BufferedReader(new FileReader(DB_FILE))) {
+            StringBuilder jsonContent = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                jsonContent.append(line);
+            }
+            
+            JSONArray jsonArray = new JSONArray(jsonContent.toString());
+            for (int i = 0; i < jsonArray.length(); i++) {
+                JSONObject jsonRecord = jsonArray.getJSONObject(i);
+                MusicRecord record = new MusicRecord(jsonRecord);
+                records.add(record);
+            }
+        } catch (org.json.JSONException e) {
+            throw new IOException("Ошибка парсинга JSON файла: " + e.getMessage());
+        }
+        System.out.println("База данных JSON загружена. Записей: " + records.size());
+    }
+    
+    public List<String> getAllRecordsAsStrings() {
+        List<String> result = new ArrayList<>();
+        for (MusicRecord record : records) {
+            result.add(record.toOldFormat());
+        }
+        return result;
+    }
+    
+    public String[] getFileInfo(String id) {
+        for (MusicRecord record : records) {
+            if (record.getId().equals(id)) {
+                return new String[]{record.getAudioFilename(), record.getCoverFilename()};
+            }
+        }
+        return null;
+    }
+    
+    // Получение аудиофайла по ID
+    public String getAudioFilenameById(String id) {
+        for (MusicRecord record : records) {
+            if (record.getId().equals(id)) {
+                return record.getAudioFilename();
+            }
+        }
+        return null;
+    }
+    
+    public void reload() throws IOException {
+        loadFromFile();
+    }
+}
+
+// Основной класс сервера
 public class Server {
     private static final int PORT = 12345;
-    private static final String DB_FILE = "music_db.txt";
     private static final String MUSIC_DIR = "music";
     private static final String COVERS_DIR = "covers";
-    private static List<String> musicData = new ArrayList<>();
-
+    private static MusicDatabase musicDatabase;
+    
     public static void main(String[] args) {
+        // Создаем необходимые директории
         new File(MUSIC_DIR).mkdir();
         new File(COVERS_DIR).mkdir();
         
-        loadDatabase();
+        try {
+            musicDatabase = new MusicDatabase();
+        } catch (FileNotFoundException e) {
+            System.err.println("ФАТАЛЬНАЯ ОШИБКА: Файл базы данных JSON не найден!");
+            System.err.println("Создайте файл " + new File("music_db.json").getAbsolutePath() + " с данными о музыке.");
+            System.err.println("Формат JSON массива объектов с полями: id, title, duration, artist, audioFilename, coverFilename");
+            System.err.println("Пример содержимого:");
+            System.err.println("[\n  {\n    \"id\": \"1\",\n    \"title\": \"Bohemian Rhapsody\",\n    \"duration\": \"6:07\",\n    \"artist\": \"Queen\",\n    \"audioFilename\": \"queen_bohemian.mp3\",\n    \"coverFilename\": \"-\"\n  }\n]");
+            System.exit(1);
+            return;
+        } catch (IOException e) {
+            System.err.println("ФАТАЛЬНАЯ ОШИБКА: Не удалось загрузить базу данных JSON!");
+            e.printStackTrace();
+            System.exit(1);
+            return;
+        }
         
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Сервер запущен на порту " + PORT);
@@ -30,41 +184,6 @@ public class Server {
             }
         } catch (IOException e) {
             e.printStackTrace();
-        }
-    }
-    
-    private static void loadDatabase() {
-        try {
-            File file = new File(DB_FILE);
-            if (!file.exists()) {
-                createSampleData();
-            }
-            
-            musicData.clear();
-            try (BufferedReader reader = new BufferedReader(new FileReader(DB_FILE))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (!line.trim().isEmpty()) {
-                        musicData.add(line);
-                    }
-                }
-            }
-            System.out.println("База данных загружена. Записей: " + musicData.size());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-    
-    private static void createSampleData() throws IOException { // !
-        try (PrintWriter writer = new PrintWriter(new FileWriter(DB_FILE))) {
-            writer.println("1:Bohemian Rhapsody:6:07:Queen:queen_bohemian.mp3:-");
-            writer.println("2:Hotel California:6:30:Eagles:eagles_hotel.mp3:-");
-            writer.println("3:Stairway to Heaven:8:02:Led Zeppelin:zeppelin_stairway.mp3:-");
-            writer.println("4:Smooth Criminal:4:17:Michael Jackson:jackson_smooth.mp3:-");
-            writer.println("5:Smells Like Teen Spirit:5:01:Nirvana:nirvana_teen.mp3:-");
-            writer.println("6:Billie Jean:4:54:Michael Jackson:jackson_billie.mp3:-");
-            writer.println("7:Like a Rolling Stone:6:13:Bob Dylan:dylan_rolling.mp3:-");
-            writer.println("8:Imagine:3:03:John Lennon:lennon_imagine.mp3:-");
         }
     }
     
@@ -85,13 +204,20 @@ public class Server {
                     System.out.println("Получен запрос: " + request);
                     
                     if (request.equals("GET_ALL")) {
-                        for (String record : musicData) {
+                        for (String record : musicDatabase.getAllRecordsAsStrings()) {
                             out.println(record);
                         }
                         out.println("END");
-                    } else if (request.startsWith("GET_FILE:")) {
-                        String filename = request.substring(9);
-                        sendFile(MUSIC_DIR, filename, socket.getOutputStream());
+                    } else if (request.startsWith("GET_FILE_BY_ID:")) {
+                        // Получаем файл по ID: находим имя файла в базе и отправляем его
+                        String id = request.substring(15);
+                        String audioFilename = musicDatabase.getAudioFilenameById(id);
+                        if (audioFilename != null) {
+                            // Отправляем файл с именем, которое нашли в базе
+                            sendFile(MUSIC_DIR, audioFilename, socket.getOutputStream());
+                        } else {
+                            out.println("ERROR:File not found for ID " + id);
+                        }
                         break;
                     } else if (request.startsWith("GET_COVER:")) {
                         String coverFilename = request.substring(10);
@@ -99,15 +225,25 @@ public class Server {
                         break;
                     } else if (request.startsWith("GET_FILE_INFO:")) {
                         String id = request.substring(14);
-                        String[] fileInfo = getFileInfo(id);
+                        String[] fileInfo = musicDatabase.getFileInfo(id);
                         if (fileInfo != null) {
+                            // Возвращаем в формате: <filename>:<cover>
                             out.println(fileInfo[0] + ":" + fileInfo[1]);
                         } else {
                             out.println("ERROR:File not found");
                         }
                     } else if (request.equals("RELOAD")) {
-                        loadDatabase();
-                        out.println("OK");
+                        try {
+                            musicDatabase.reload();
+                            out.println("OK");
+                        } catch (IOException e) {
+                            out.println("ERROR:Failed to reload database: " + e.getMessage());
+                        }
+                    } else if (request.startsWith("GET_FILE:")) {
+                        // Старая команда для совместимости (по имени файла)
+                        String filename = request.substring(9);
+                        sendFile(MUSIC_DIR, filename, socket.getOutputStream());
+                        break;
                     } else {
                         out.println("ERROR: Unknown command");
                     }
@@ -129,7 +265,7 @@ public class Server {
                 if (!file.exists()) {
                     System.out.println("Файл не найден: " + file.getAbsolutePath());
                     PrintWriter out = new PrintWriter(socketOut, true);
-                    out.println("ERROR:File not found");
+                    out.println("ERROR:File not found: " + filename);
                     return;
                 }
                 
@@ -165,7 +301,6 @@ public class Server {
                 if (coverFile.exists()) {
                     sendFile(COVERS_DIR, coverFilename, socketOut);
                 } else {
-                    // Если обложки нет, создаем обложку по умолчанию
                     createAndSendDefaultCover(socketOut);
                 }
                 
@@ -181,7 +316,6 @@ public class Server {
             
             Graphics2D g2d = image.createGraphics();
             
-            // Градиентный фон
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
                     int r = 40 + (x * 60) / width;
@@ -192,7 +326,6 @@ public class Server {
                 }
             }
             
-            // Текст
             g2d.setColor(Color.WHITE);
             g2d.setFont(new Font("Arial", Font.BOLD, 24));
             String text = "Музыка";
@@ -211,18 +344,6 @@ public class Server {
             out.println("FILE_SIZE:" + imageData.length);
             socketOut.write(imageData, 0, imageData.length);
             socketOut.flush();
-        }
-        
-        private String[] getFileInfo(String id) {
-            for (String record : musicData) {
-                String[] parts = record.split(":");
-                if (parts.length >= 6 && parts[0].equals(id)) {
-                    String audioFile = parts[5];
-                    String coverFile = parts.length >= 7 ? parts[6] : "-";
-                    return new String[]{audioFile, coverFile};
-                }
-            }
-            return null;
         }
     }
 }

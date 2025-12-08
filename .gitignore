@@ -3,6 +3,6 @@
 /client/lib
 
 /server/lib
-/server/music_db.txt
+/server/music_db.json
 /server/music
 /server/covers
