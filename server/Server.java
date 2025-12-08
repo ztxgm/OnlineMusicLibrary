@@ -55,7 +55,7 @@ public class Server {
         }
     }
     
-    private static void createSampleData() throws IOException {
+    private static void createSampleData() throws IOException { // !
         try (PrintWriter writer = new PrintWriter(new FileWriter(DB_FILE))) {
             writer.println("1:Bohemian Rhapsody:6:07:Queen:queen_bohemian.mp3:-");
             writer.println("2:Hotel California:6:30:Eagles:eagles_hotel.mp3:-");
