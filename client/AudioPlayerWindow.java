@@ -48,6 +48,8 @@ public class AudioPlayerWindow {
                            List<Client.MusicTrack> trackList, 
                            String serverAddress, int serverPort,
                            MultipleSelectionModel<Client.MusicTrack> selectionModel) {
+        Logger.info("Создание AudioPlayerWindow для трека: " + track.getTitle());
+        
         this.currentTrack = track;
         this.currentTrackIndex = trackIndex;
         this.trackList = trackList;
@@ -60,6 +62,8 @@ public class AudioPlayerWindow {
     }
     
     private void createWindow() {
+        Logger.debug("Создание окна аудиоплеера");
+        
         stage = new Stage();
         stage.setTitle(currentTrack.getTitle());
         stage.setWidth(WINDOW_WIDTH);
@@ -162,6 +166,7 @@ public class AudioPlayerWindow {
         volumeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
             if (mediaPlayer != null) {
                 mediaPlayer.setVolume(newValue.doubleValue() / 100.0);
+                Logger.debug("Изменение громкости: " + newValue + "%");
             }
         });
         
@@ -204,6 +209,7 @@ public class AudioPlayerWindow {
                 seeking = true;
                 double seekTime = mediaPlayer.getTotalDuration().toSeconds() * (newValue.doubleValue() / 100.0);
                 mediaPlayer.seek(Duration.seconds(seekTime));
+                Logger.debug("Перемотка на: " + seekTime + " секунд");
                 Platform.runLater(() -> {
                     updateTimeLabelForSeek(seekTime);
                 });
@@ -236,11 +242,16 @@ public class AudioPlayerWindow {
         
         loadCover(currentTrack.getCover());
         selectInList(currentTrackIndex);
+        
+        Logger.info("Окно аудиоплеера создано для трека: " + currentTrack.getTitle());
     }
     
     private void loadAndPlayTrack() {
+        Logger.info("Загрузка и воспроизведение трека: " + currentTrack.getTitle() + " (ID: " + currentTrack.getId() + ")");
+        
         new Thread(() -> {
             try {
+                Logger.debug("Установка соединения с сервером: " + serverAddress + ":" + serverPort);
                 Socket socket = new Socket(serverAddress, serverPort);
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -250,22 +261,27 @@ public class AudioPlayerWindow {
                 request.put("command", "GET_FILE_BY_ID");
                 request.put("id", currentTrack.getId());
                 out.println(request.toString());
+                Logger.debug("Отправлен запрос на получение файла с ID: " + currentTrack.getId());
                 
                 // Получаем JSON ответ о файле
                 String response = in.readLine();
                 JSONObject jsonResponse = new JSONObject(response);
                 
                 if (!jsonResponse.getString("status").equals("FILE")) {
-                    Platform.runLater(() -> showError("Ошибка получения файла: " + 
-                        (jsonResponse.has("message") ? jsonResponse.getString("message") : "Неизвестная ошибка")));
+                    String errorMsg = "Ошибка получения файла: " + 
+                        (jsonResponse.has("message") ? jsonResponse.getString("message") : "Неизвестная ошибка");
+                    Logger.error(errorMsg);
+                    Platform.runLater(() -> showError(errorMsg));
                     socket.close();
                     return;
                 }
                 
                 long fileSize = jsonResponse.getLong("size");
+                Logger.info("Получение аудиофайла размером: " + fileSize + " байт");
                 
                 File tempFile = File.createTempFile("stream_", ".mp3");
                 tempFile.deleteOnExit();
+                Logger.debug("Создан временный файл: " + tempFile.getAbsolutePath());
                 
                 try (FileOutputStream fos = new FileOutputStream(tempFile);
                      InputStream is = socket.getInputStream()) {
@@ -279,9 +295,12 @@ public class AudioPlayerWindow {
                         fos.write(buffer, 0, bytesRead);
                         totalRead += bytesRead;
                     }
+                    
+                    Logger.debug("Аудиофайл загружен: " + totalRead + " из " + fileSize + " байт");
                 }
                 
                 socket.close();
+                Logger.debug("Соединение с сервером закрыто");
                 
                 Platform.runLater(() -> {
                     try {
@@ -289,52 +308,66 @@ public class AudioPlayerWindow {
                         Media media = new Media(fileUrl);
                         
                         if (mediaPlayer != null) {
+                            Logger.debug("Остановка предыдущего медиаплеера");
                             mediaPlayer.stop();
                             mediaPlayer.dispose();
                         }
                         
                         mediaPlayer = new MediaPlayer(media);
+                        Logger.info("Медиаплеер создан для трека: " + currentTrack.getTitle());
                         
                         // Устанавливаем начальную громкость
                         mediaPlayer.setVolume(volumeSlider.getValue() / 100.0);
                         
                         mediaPlayer.setOnReady(() -> {
+                            Logger.debug("Медиа готово к воспроизведению");
                             playPauseButton.setDisable(false);
                             progressSlider.setDisable(false);
                             updateTimeLabel();
                             
                             mediaPlayer.play();
+                            Logger.info("Начато воспроизведение трека: " + currentTrack.getTitle());
                             playPauseButton.setText("⏸");
                             setupTimeListener();
                         });
                         
                         mediaPlayer.setOnEndOfMedia(() -> {
+                            Logger.debug("Трек завершен: " + currentTrack.getTitle());
                             playPauseButton.setText("▶");
                             Platform.runLater(() -> {
                                 if (hasNextTrack()) {
+                                    Logger.info("Автоматический переход к следующему треку");
                                     playNextTrack();
                                 }
                             });
                         });
                         
                         mediaPlayer.setOnError(() -> {
-                            showError("Ошибка воспроизведения: " + 
-                                    (mediaPlayer.getError() != null ? mediaPlayer.getError().getMessage() : "Неизвестная ошибка"));
+                            String errorMsg = "Ошибка воспроизведения: " + 
+                                    (mediaPlayer.getError() != null ? mediaPlayer.getError().getMessage() : "Неизвестная ошибка");
+                            Logger.error(errorMsg);
+                            showError(errorMsg);
                         });
                         
                     } catch (Exception e) {
-                        showError("Ошибка создания медиаплеера: " + e.getMessage());
+                        String errorMsg = "Ошибка создания медиаплеера: " + e.getMessage();
+                        Logger.error(errorMsg, e);
+                        showError(errorMsg);
                     }
                 });
                 
             } catch (Exception e) {
-                Platform.runLater(() -> showError("Ошибка загрузки трека: " + e.getMessage()));
+                String errorMsg = "Ошибка загрузки трека: " + e.getMessage();
+                Logger.error(errorMsg, e);
+                Platform.runLater(() -> showError(errorMsg));
             }
         }).start();
     }
     
     private void loadCover(String coverFilename) {
+        Logger.debug("Загрузка обложки: " + coverFilename);
         if (coverFilename == null || coverFilename.isEmpty() || coverFilename.equals("-")) {
+            Logger.debug("Используется обложка по умолчанию");
             loadDefaultCover();
         } else {
             loadCoverFile(coverFilename);
@@ -342,6 +375,8 @@ public class AudioPlayerWindow {
     }
     
     private void loadCoverFile(String coverFilename) {
+        Logger.debug("Загрузка файла обложки: " + coverFilename);
+        
         new Thread(() -> {
             try {
                 Socket socket = new Socket(serverAddress, serverPort);
@@ -353,18 +388,21 @@ public class AudioPlayerWindow {
                 request.put("command", "GET_COVER");
                 request.put("coverFilename", coverFilename);
                 out.println(request.toString());
+                Logger.debug("Отправлен запрос на получение обложки: " + coverFilename);
                 
                 // Получаем JSON ответ о файле
                 String response = in.readLine();
                 JSONObject jsonResponse = new JSONObject(response);
                 
                 if (!jsonResponse.getString("status").equals("FILE")) {
+                    Logger.warning("Не удалось получить обложку: " + coverFilename);
                     Platform.runLater(() -> loadDefaultCover());
                     socket.close();
                     return;
                 }
                 
                 long fileSize = jsonResponse.getLong("size");
+                Logger.debug("Получение обложки размером: " + fileSize + " байт");
                 
                 File tempFile = File.createTempFile("cover_", ".png");
                 tempFile.deleteOnExit();
@@ -381,6 +419,8 @@ public class AudioPlayerWindow {
                         fos.write(buffer, 0, bytesRead);
                         totalRead += bytesRead;
                     }
+                    
+                    Logger.debug("Обложка загружена: " + totalRead + " из " + fileSize + " байт");
                 }
                 
                 socket.close();
@@ -389,18 +429,23 @@ public class AudioPlayerWindow {
                     try {
                         Image image = new Image(tempFile.toURI().toString(), COVER_SIZE, COVER_SIZE, true, true, true);
                         coverImageView.setImage(image);
+                        Logger.debug("Обложка установлена: " + coverFilename);
                     } catch (Exception e) {
+                        Logger.error("Ошибка загрузки обложки: " + e.getMessage());
                         loadDefaultCover();
                     }
                 });
                 
             } catch (Exception e) {
+                Logger.error("Ошибка загрузки обложки: " + e.getMessage(), e);
                 Platform.runLater(() -> loadDefaultCover());
             }
         }).start();
     }
     
     private void loadDefaultCover() {
+        Logger.debug("Создание обложки по умолчанию");
+        
         javafx.scene.canvas.Canvas canvas = new javafx.scene.canvas.Canvas(COVER_SIZE, COVER_SIZE);
         javafx.scene.canvas.GraphicsContext gc = canvas.getGraphicsContext2D();
         
@@ -426,9 +471,12 @@ public class AudioPlayerWindow {
         gc.fillText(artist, COVER_SIZE/2 - 60, COVER_SIZE/2 + 20);
         
         coverImageView.setImage(canvas.snapshot(null, null));
+        Logger.debug("Обложка по умолчанию создана");
     }
     
     private void setupTimeListener() {
+        Logger.debug("Настройка слушателя времени воспроизведения");
+        
         if (timeChangeListener != null && mediaPlayer != null) {
             mediaPlayer.currentTimeProperty().removeListener(timeChangeListener);
         }
@@ -455,6 +503,8 @@ public class AudioPlayerWindow {
     }
     
     public void loadTrack(Client.MusicTrack track, int trackIndex, List<Client.MusicTrack> trackList) {
+        Logger.info("Загрузка нового трека: " + track.getTitle() + " (индекс: " + trackIndex + ")");
+        
         this.currentTrack = track;
         this.currentTrackIndex = trackIndex;
         this.trackList = trackList;
@@ -473,6 +523,7 @@ public class AudioPlayerWindow {
             userIsAdjusting = false;
             
             if (mediaPlayer != null) {
+                Logger.debug("Остановка предыдущего медиаплеера");
                 mediaPlayer.stop();
                 mediaPlayer.dispose();
                 mediaPlayer = null;
@@ -490,14 +541,18 @@ public class AudioPlayerWindow {
         
         if (mediaPlayer.getStatus() == MediaPlayer.Status.PLAYING) {
             mediaPlayer.pause();
+            Logger.debug("Пауза воспроизведения");
             playPauseButton.setText("▶");
         } else {
             mediaPlayer.play();
+            Logger.debug("Возобновление воспроизведения");
             playPauseButton.setText("⏸");
         }
     }
     
     private void stop() {
+        Logger.debug("Остановка воспроизведения");
+        
         if (mediaPlayer != null) {
             mediaPlayer.stop();
             playPauseButton.setText("▶");
@@ -509,17 +564,23 @@ public class AudioPlayerWindow {
     }
     
     private void playPreviousTrack() {
+        Logger.info("Запрос на воспроизведение предыдущего трека");
+        
         if (hasPreviousTrack()) {
             int prevIndex = currentTrackIndex - 1;
             Client.MusicTrack prevTrack = trackList.get(prevIndex);
+            Logger.debug("Переход к предыдущему треку: " + prevTrack.getTitle());
             loadTrack(prevTrack, prevIndex, trackList);
         }
     }
     
     private void playNextTrack() {
+        Logger.info("Запрос на воспроизведение следующего трека");
+        
         if (hasNextTrack()) {
             int nextIndex = currentTrackIndex + 1;
             Client.MusicTrack nextTrack = trackList.get(nextIndex);
+            Logger.debug("Переход к следующему треку: " + nextTrack.getTitle());
             loadTrack(nextTrack, nextIndex, trackList);
         }
     }
@@ -565,6 +626,8 @@ public class AudioPlayerWindow {
     }
     
     private void showError(String message) {
+        Logger.error("Показать ошибку пользователю: " + message);
+        
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle("Ошибка");
         alert.setHeaderText(null);
@@ -573,6 +636,8 @@ public class AudioPlayerWindow {
     }
     
     public void stopAudio() {
+        Logger.info("Остановка аудио и очистка ресурсов");
+        
         if (mediaPlayer != null) {
             mediaPlayer.stop();
             mediaPlayer.dispose();
@@ -581,6 +646,7 @@ public class AudioPlayerWindow {
     }
     
     public void show() {
+        Logger.info("Показ окна аудиоплеера");
         stage.show();
     }
     
@@ -589,6 +655,8 @@ public class AudioPlayerWindow {
     }
     
     public void selectInList(int index) {
+        Logger.debug("Выбор трека в списке по индексу: " + index);
+        
         Platform.runLater(() -> {
             if (selectionModel != null) {
                 selectionModel.select(index);

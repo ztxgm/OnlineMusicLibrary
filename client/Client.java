@@ -26,6 +26,8 @@ public class Client extends Application {
     
     @Override
     public void start(Stage primaryStage) {
+        Logger.info("Запуск клиентского приложения OnlineMusicLibrary");
+        
         VBox root = new VBox(10);
         root.setPadding(new Insets(10));
         
@@ -53,6 +55,7 @@ public class Client extends Application {
         // Двойной клик для открытия плеера
         listView.setOnMouseClicked(event -> {
             if (event.getClickCount() == 2) {
+                Logger.debug("Двойной клик по списку треков");
                 openAudioPlayer();
             }
         });
@@ -81,6 +84,7 @@ public class Client extends Application {
                 if (newValue != null) {
                     selectedTrackLabel.setText(newValue.getTitle() + " (" + newValue.getDuration() + ")");
                     playButton.setDisable(false);
+                    Logger.debug("Выбран трек: " + newValue.getTitle());
                 } else {
                     playButton.setDisable(true);
                 }
@@ -94,10 +98,14 @@ public class Client extends Application {
         primaryStage.setScene(scene);
         primaryStage.show();
         
+        Logger.info("Главное окно клиента отображено");
+        
         primaryStage.setOnCloseRequest(e -> {
+            Logger.info("Закрытие клиентского приложения");
             if (playerWindow != null) {
                 playerWindow.stopAudio();
             }
+            Logger.close();
         });
         
         reloadButton.disableProperty().bind(
@@ -106,6 +114,8 @@ public class Client extends Application {
     }
     
     private void showConnectDialog() {
+        Logger.debug("Отображение диалога подключения к серверу");
+        
         Dialog<ConnectionInfo> dialog = new Dialog<>();
         dialog.setTitle("Подключение к серверу");
         dialog.setHeaderText("Введите параметры подключения:");
@@ -139,6 +149,7 @@ public class Client extends Application {
                         Integer.parseInt(portField.getText())
                     );
                 } catch (NumberFormatException e) {
+                    Logger.error("Некорректный номер порта: " + portField.getText());
                     return null;
                 }
             }
@@ -148,14 +159,18 @@ public class Client extends Application {
         dialog.showAndWait().ifPresent(info -> {
             currentServer = info.server;
             currentPort = info.port;
+            Logger.info("Введены параметры подключения: " + currentServer + ":" + currentPort);
             connectToServer();
         });
     }
     
     private void connectToServer() {
+        Logger.info("Попытка подключения к серверу: " + currentServer + ":" + currentPort);
+        
         try {
             if (socket != null && !socket.isClosed()) {
                 socket.close();
+                Logger.debug("Закрыто предыдущее соединение");
             }
             
             socket = new Socket(currentServer, currentPort);
@@ -163,16 +178,23 @@ public class Client extends Application {
             out = new PrintWriter(socket.getOutputStream(), true);
             
             statusLabel.setText("Подключено к " + currentServer + ":" + currentPort);
+            Logger.info("Успешное подключение к серверу");
+            
             loadTracks();
             
         } catch (IOException e) {
+            String errorMsg = "Ошибка подключения: " + e.getMessage();
+            Logger.error(errorMsg, e);
             statusLabel.setText("Ошибка подключения: " + e.getMessage());
             showAlert("Ошибка подключения", "Не удалось подключиться к серверу " + currentServer + ":" + currentPort);
         }
     }
     
     private void loadTracks() {
+        Logger.info("Загрузка списка треков с сервера");
+        
         if (out == null) {
+            Logger.error("Нет подключения к серверу для загрузки треков");
             showAlert("Ошибка", "Сначала подключитесь к серверу");
             return;
         }
@@ -182,18 +204,22 @@ public class Client extends Application {
             JSONObject request = new JSONObject();
             request.put("command", "GET_ALL");
             out.println(request.toString());
+            Logger.debug("Отправлен запрос GET_ALL на сервер");
             
             // Получаем JSON ответ
             String response = in.readLine();
             JSONObject jsonResponse = new JSONObject(response);
             
             if (!jsonResponse.getString("status").equals("OK")) {
-                showAlert("Ошибка", "Ошибка загрузки треков: " + jsonResponse.getString("message"));
+                String errorMsg = "Ошибка загрузки треков: " + jsonResponse.getString("message");
+                Logger.error(errorMsg);
+                showAlert("Ошибка", errorMsg);
                 return;
             }
             
             trackList.clear();
             JSONArray tracksArray = jsonResponse.getJSONArray("data");
+            Logger.info("Получено " + tracksArray.length() + " треков от сервера");
             
             for (int i = 0; i < tracksArray.length(); i++) {
                 JSONObject trackJson = tracksArray.getJSONObject(i);
@@ -203,28 +229,39 @@ public class Client extends Application {
                 }
             }
             
+            Logger.info("Список треков обновлен, количество: " + trackList.size());
+            
         } catch (IOException e) {
+            Logger.error("Ошибка ввода-вывода при загрузке треков: " + e.getMessage(), e);
             statusLabel.setText("Ошибка загрузки данных");
             showAlert("Ошибка", "Не удалось загрузить данные с сервера");
         } catch (JSONException e) {
+            Logger.error("Ошибка парсинга JSON ответа от сервера: " + e.getMessage(), e);
             showAlert("Ошибка", "Некорректный ответ от сервера: " + e.getMessage());
+        } catch (Exception e) {
+            Logger.error("Неожиданная ошибка при загрузке треков: " + e.getMessage(), e);
+            showAlert("Ошибка", "Неожиданная ошибка: " + e.getMessage());
         }
     }
     
     private void openAudioPlayer() {
         MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
         if (selectedTrack == null) {
+            Logger.warning("Попытка открыть плеер без выбранного трека");
             showAlert("Ошибка", "Выберите трек для воспроизведения");
             return;
         }
         
         int selectedIndex = listView.getSelectionModel().getSelectedIndex();
+        Logger.info("Открытие аудиоплеера для трека: " + selectedTrack.getTitle() + " (индекс: " + selectedIndex + ")");
         
         // Если окно плеера уже существует, обновляем его
         if (playerWindow != null && playerWindow.isShowing()) {
+            Logger.debug("Обновление существующего окна аудиоплеера");
             playerWindow.loadTrack(selectedTrack, selectedIndex, trackList);
         } else {
             // Создаем новое окно
+            Logger.debug("Создание нового окна аудиоплеера");
             playerWindow = new AudioPlayerWindow(
                 selectedTrack, 
                 selectedIndex, 
@@ -238,6 +275,8 @@ public class Client extends Application {
     }
     
     private void showAlert(String title, String message) {
+        Logger.warning("Показать alert: " + title + " - " + message);
+        
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(null);
@@ -246,6 +285,7 @@ public class Client extends Application {
     }
     
     public static void main(String[] args) {
+        Logger.info("Запуск клиентского приложения OnlineMusicLibrary");
         launch(args);
     }
     
@@ -288,7 +328,7 @@ public class Client extends Application {
                     json.optString("coverFilename", "-")
                 );
             } catch (Exception e) {
-                e.printStackTrace();
+                Logger.error("Ошибка создания MusicTrack из JSON: " + e.getMessage(), e);
                 return null;
             }
         }
