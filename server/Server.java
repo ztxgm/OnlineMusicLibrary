@@ -7,6 +7,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Font;
 import org.json.*;
+import java.util.Base64;
 
 public class Server {
     private static final int PORT = 12345;
@@ -23,8 +24,8 @@ public class Server {
         
         Logger.info("Запуск сервера...");
         
-        new File(MUSIC_DIR).mkdir();
-        new File(COVERS_DIR).mkdir();
+        new File(MUSIC_DIR).mkdirs();
+        new File(COVERS_DIR).mkdirs();
         
         loadDatabase();
         
@@ -47,8 +48,9 @@ public class Server {
         try {
             File file = new File(DB_FILE);
             if (!file.exists()) {
-                Logger.error("База данных отсутствует!");
-                System.exit(1);
+                Logger.warning("База данных отсутствует, создаем пустую...");
+                saveDatabase();
+                return;
             }
             
             musicData.clear();
@@ -76,11 +78,74 @@ public class Server {
             Logger.info("База данных загружена. Записей: " + musicData.size());
         } catch (IOException e) {
             Logger.error("Ошибка чтения базы данных: " + e.getMessage(), e);
-            System.exit(1);
         } catch (JSONException e) {
             Logger.error("Ошибка парсинга JSON: " + e.getMessage(), e);
-            System.exit(1);
         }
+    }
+    
+    private static synchronized void saveDatabase() {
+        try {
+            JSONArray jsonArray = new JSONArray();
+            for (MusicRecord record : musicData) {
+                JSONObject jsonRecord = new JSONObject();
+                jsonRecord.put("id", record.getId());
+                jsonRecord.put("title", record.getTitle());
+                jsonRecord.put("duration", record.getDuration());
+                jsonRecord.put("artist", record.getArtist());
+                jsonRecord.put("audioFilename", record.getAudioFilename());
+                jsonRecord.put("coverFilename", record.getCoverFilename());
+                jsonArray.put(jsonRecord);
+            }
+            
+            try (FileWriter writer = new FileWriter(DB_FILE)) {
+                writer.write(jsonArray.toString(2));
+            }
+            Logger.info("База данных сохранена. Записей: " + musicData.size());
+        } catch (IOException e) {
+            Logger.error("Ошибка сохранения базы данных: " + e.getMessage(), e);
+        }
+    }
+    
+    private static MusicRecord findRecordById(String id) {
+        for (MusicRecord record : musicData) {
+            if (record.getId().equals(id)) {
+                return record;
+            }
+        }
+        return null;
+    }
+    
+    private static boolean deleteFile(String directory, String filename) {
+        if (filename == null || filename.equals("-")) {
+            return true;
+        }
+        
+        File file = new File(directory + File.separator + filename);
+        if (file.exists()) {
+            boolean deleted = file.delete();
+            if (deleted) {
+                Logger.info("Файл удален: " + file.getAbsolutePath());
+            } else {
+                Logger.warning("Не удалось удалить файл: " + file.getAbsolutePath());
+            }
+            return deleted;
+        }
+        return true;
+    }
+    
+    private static String generateUniqueId() {
+        int maxId = 0;
+        for (MusicRecord record : musicData) {
+            try {
+                int id = Integer.parseInt(record.getId());
+                if (id > maxId) {
+                    maxId = id;
+                }
+            } catch (NumberFormatException e) {
+                // Пропускаем нечисловые ID
+            }
+        }
+        return String.valueOf(maxId + 1);
     }
        
     private static class ClientHandler extends Thread {
@@ -131,6 +196,23 @@ public class Server {
                                 response.put("message", "База данных перезагружена");
                                 break;
                                 
+                            case "ADD_TRACK":
+                                handleAddTrack(jsonRequest, response);
+                                break;
+                                
+                            case "UPDATE_TRACK":
+                                handleUpdateTrack(jsonRequest, response);
+                                break;
+                                
+                            case "DELETE_TRACK":
+                                handleDeleteTrack(jsonRequest, response);
+                                break;
+                                
+                            case "GET_NEXT_ID":
+                                response.put("status", "OK");
+                                response.put("nextId", generateUniqueId());
+                                break;
+                                
                             default:
                                 response.put("status", "ERROR");
                                 response.put("message", "Неизвестная команда: " + command);
@@ -179,14 +261,13 @@ public class Server {
         }
         
         private void handleGetFileInfo(String id, JSONObject response) {
-            for (MusicRecord record : musicData) {
-                if (record.getId().equals(id)) {
-                    response.put("status", "OK");
-                    response.put("audioFilename", record.getAudioFilename());
-                    response.put("coverFilename", record.getCoverFilename());
-                    Logger.debug("Найдена информация о файле с ID: " + id);
-                    return;
-                }
+            MusicRecord record = findRecordById(id);
+            if (record != null) {
+                response.put("status", "OK");
+                response.put("audioFilename", record.getAudioFilename());
+                response.put("coverFilename", record.getCoverFilename());
+                Logger.debug("Найдена информация о файле с ID: " + id);
+                return;
             }
             
             response.put("status", "ERROR");
@@ -196,15 +277,9 @@ public class Server {
         
         private void handleGetFileById(String id) {
             try {
-                String audioFilename = null;
-                for (MusicRecord record : musicData) {
-                    if (record.getId().equals(id)) {
-                        audioFilename = record.getAudioFilename();
-                        break;
-                    }
-                }
+                MusicRecord record = findRecordById(id);
                 
-                if (audioFilename == null) {
+                if (record == null) {
                     JSONObject errorResponse = new JSONObject();
                     errorResponse.put("status", "ERROR");
                     errorResponse.put("message", "Файл с ID " + id + " не найден");
@@ -213,7 +288,7 @@ public class Server {
                     return;
                 }
                 
-                sendFile(MUSIC_DIR, audioFilename);
+                sendFile(MUSIC_DIR, record.getAudioFilename());
                 
             } catch (Exception e) {
                 Logger.error("Ошибка при отправке файла", e);
@@ -223,12 +298,184 @@ public class Server {
         private void handleGetCover(String coverFilename) {
             try {
                 if (coverFilename == null || coverFilename.equals("-")) {
-                    createAndSendDefaultCover();
+                    createAndSendDefaultCover("Default Cover", "No Artist");
                 } else {
                     sendFile(COVERS_DIR, coverFilename);
                 }
             } catch (Exception e) {
                 Logger.error("Ошибка при отправке обложки", e);
+            }
+        }
+        
+        private void handleAddTrack(JSONObject request, JSONObject response) {
+            try {
+                String id = request.optString("id", "");
+                if (id.isEmpty()) {
+                    id = generateUniqueId();
+                }
+                
+                // Проверяем, существует ли уже такой ID
+                if (findRecordById(id) != null) {
+                    response.put("status", "ERROR");
+                    response.put("message", "Трек с ID " + id + " уже существует");
+                    Logger.warning("Попытка добавить трек с существующим ID: " + id);
+                    return;
+                }
+                
+                String title = request.getString("title");
+                String duration = request.getString("duration");
+                String artist = request.getString("artist");
+                String audioFilename = request.getString("audioFilename");
+                String coverFilename = request.optString("coverFilename", "-");
+                
+                // Сохраняем аудиофайл
+                if (request.has("audioData")) {
+                    String audioDataBase64 = request.getString("audioData");
+                    byte[] audioData = Base64.getDecoder().decode(audioDataBase64);
+                    File audioFile = new File(MUSIC_DIR + File.separator + audioFilename);
+                    
+                    try (FileOutputStream fos = new FileOutputStream(audioFile)) {
+                        fos.write(audioData);
+                    }
+                    Logger.info("Аудиофайл сохранен: " + audioFile.getAbsolutePath());
+                }
+                
+                // Сохраняем обложку
+                if (request.has("coverData") && !request.getString("coverData").isEmpty()) {
+                    String coverDataBase64 = request.getString("coverData");
+                    byte[] coverData = Base64.getDecoder().decode(coverDataBase64);
+                    File coverFile = new File(COVERS_DIR + File.separator + coverFilename);
+                    
+                    try (FileOutputStream fos = new FileOutputStream(coverFile)) {
+                        fos.write(coverData);
+                    }
+                    Logger.info("Обложка сохранена: " + coverFile.getAbsolutePath());
+                }
+                
+                // Создаем запись
+                MusicRecord record = new MusicRecord(id, title, duration, artist, audioFilename, coverFilename);
+                musicData.add(record);
+                
+                // Сохраняем базу
+                saveDatabase();
+                
+                response.put("status", "OK");
+                response.put("message", "Трек успешно добавлен");
+                response.put("id", id);
+                Logger.info("Добавлен новый трек: " + title + " (ID: " + id + ")");
+                
+            } catch (Exception e) {
+                response.put("status", "ERROR");
+                response.put("message", "Ошибка при добавлении трека: " + e.getMessage());
+                Logger.error("Ошибка при добавлении трека", e);
+            }
+        }
+        
+        private void handleUpdateTrack(JSONObject request, JSONObject response) {
+            try {
+                String id = request.getString("id");
+                MusicRecord record = findRecordById(id);
+                
+                if (record == null) {
+                    response.put("status", "ERROR");
+                    response.put("message", "Трек с ID " + id + " не найден");
+                    Logger.warning("Попытка обновить несуществующий трек с ID: " + id);
+                    return;
+                }
+                
+                // Удаляем старые файлы, если имена изменились
+                String oldAudioFilename = record.getAudioFilename();
+                String oldCoverFilename = record.getCoverFilename();
+                String newAudioFilename = request.getString("audioFilename");
+                String newCoverFilename = request.optString("coverFilename", "-");
+                
+                // Обновляем аудиофайл
+                if (request.has("audioData")) {
+                    String audioDataBase64 = request.getString("audioData");
+                    byte[] audioData = Base64.getDecoder().decode(audioDataBase64);
+                    
+                    // Удаляем старый файл, если имя изменилось
+                    if (!oldAudioFilename.equals(newAudioFilename)) {
+                        deleteFile(MUSIC_DIR, oldAudioFilename);
+                    }
+                    
+                    File audioFile = new File(MUSIC_DIR + File.separator + newAudioFilename);
+                    try (FileOutputStream fos = new FileOutputStream(audioFile)) {
+                        fos.write(audioData);
+                    }
+                    Logger.info("Аудиофайл обновлен: " + audioFile.getAbsolutePath());
+                }
+                
+                // Обновляем обложку
+                if (request.has("coverData")) {
+                    String coverDataBase64 = request.getString("coverData");
+                    if (!coverDataBase64.isEmpty()) {
+                        byte[] coverData = Base64.getDecoder().decode(coverDataBase64);
+                        
+                        // Удаляем старый файл, если имя изменилось
+                        if (!oldCoverFilename.equals(newCoverFilename)) {
+                            deleteFile(COVERS_DIR, oldCoverFilename);
+                        }
+                        
+                        File coverFile = new File(COVERS_DIR + File.separator + newCoverFilename);
+                        try (FileOutputStream fos = new FileOutputStream(coverFile)) {
+                            fos.write(coverData);
+                        }
+                        Logger.info("Обложка обновлена: " + coverFile.getAbsolutePath());
+                    }
+                }
+                
+                // Обновляем запись
+                record.setTitle(request.getString("title"));
+                record.setDuration(request.getString("duration"));
+                record.setArtist(request.getString("artist"));
+                record.setAudioFilename(newAudioFilename);
+                record.setCoverFilename(newCoverFilename);
+                
+                // Сохраняем базу
+                saveDatabase();
+                
+                response.put("status", "OK");
+                response.put("message", "Трек успешно обновлен");
+                Logger.info("Трек обновлен: " + record.getTitle() + " (ID: " + id + ")");
+                
+            } catch (Exception e) {
+                response.put("status", "ERROR");
+                response.put("message", "Ошибка при обновлении трека: " + e.getMessage());
+                Logger.error("Ошибка при обновлении трека", e);
+            }
+        }
+        
+        private void handleDeleteTrack(JSONObject request, JSONObject response) {
+            try {
+                String id = request.getString("id");
+                MusicRecord record = findRecordById(id);
+                
+                if (record == null) {
+                    response.put("status", "ERROR");
+                    response.put("message", "Трек с ID " + id + " не найден");
+                    Logger.warning("Попытка удалить несуществующий трек с ID: " + id);
+                    return;
+                }
+                
+                // Удаляем файлы
+                deleteFile(MUSIC_DIR, record.getAudioFilename());
+                deleteFile(COVERS_DIR, record.getCoverFilename());
+                
+                // Удаляем запись
+                musicData.remove(record);
+                
+                // Сохраняем базу
+                saveDatabase();
+                
+                response.put("status", "OK");
+                response.put("message", "Трек успешно удален");
+                Logger.info("Трек удален: " + record.getTitle() + " (ID: " + id + ")");
+                
+            } catch (Exception e) {
+                response.put("status", "ERROR");
+                response.put("message", "Ошибка при удалении трека: " + e.getMessage());
+                Logger.error("Ошибка при удалении трека", e);
             }
         }
         
@@ -268,7 +515,7 @@ public class Server {
             }
         }
         
-        private void createAndSendDefaultCover() throws IOException {
+        private void createAndSendDefaultCover(String title, String artist) throws IOException {
             Logger.debug("Создание обложки по умолчанию");
             
             int width = 300;
@@ -289,11 +536,14 @@ public class Server {
             
             g2d.setColor(Color.WHITE);
             g2d.setFont(new Font("Arial", Font.BOLD, 24));
-            String text = "Музыка";
+            String text = title.length() > 15 ? title.substring(0, 12) + "..." : title;
             int textWidth = g2d.getFontMetrics().stringWidth(text);
             int x = (width - textWidth) / 2;
             int y = height / 2;
             g2d.drawString(text, x, y);
+            
+            g2d.setFont(new Font("Arial", Font.PLAIN, 16));
+            g2d.drawString(artist, x, y + 30);
             
             g2d.dispose();
             
@@ -338,5 +588,11 @@ public class Server {
         public String getArtist() { return artist; }
         public String getAudioFilename() { return audioFilename; }
         public String getCoverFilename() { return coverFilename; }
+        
+        public void setTitle(String title) { this.title = title; }
+        public void setDuration(String duration) { this.duration = duration; }
+        public void setArtist(String artist) { this.artist = artist; }
+        public void setAudioFilename(String audioFilename) { this.audioFilename = audioFilename; }
+        public void setCoverFilename(String coverFilename) { this.coverFilename = coverFilename; }
     }
 }

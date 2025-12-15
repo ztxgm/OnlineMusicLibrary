@@ -1,4 +1,5 @@
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -35,10 +36,12 @@ public class Client extends Application {
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("Обновить");
         Button playButton = new Button("Воспроизвести");
+        Button addButton = new Button("Добавить трек");
         playButton.setDisable(true);
         reloadButton.setDisable(true);
+        addButton.setDisable(true);
         
-        controlPanel.getChildren().addAll(connectButton, reloadButton, playButton, statusLabel);
+        controlPanel.getChildren().addAll(connectButton, reloadButton, playButton, addButton, statusLabel);
         
         listView.setCellFactory(param -> new ListCell<MusicTrack>() {
             @Override
@@ -60,6 +63,18 @@ public class Client extends Application {
             }
         });
         
+        // Контекстное меню для правого клика
+        ContextMenu contextMenu = new ContextMenu();
+        MenuItem editMenuItem = new MenuItem("Редактировать");
+        MenuItem deleteMenuItem = new MenuItem("Удалить");
+        
+        contextMenu.getItems().addAll(editMenuItem, deleteMenuItem);
+        listView.setContextMenu(contextMenu);
+        
+        // Обработчики контекстного меню
+        editMenuItem.setOnAction(e -> editSelectedTrack());
+        deleteMenuItem.setOnAction(e -> deleteSelectedTrack());
+        
         VBox infoPanel = new VBox(5);
         infoPanel.setPadding(new Insets(10));
         infoPanel.setStyle("-fx-border-color: gray; -fx-border-width: 1;");
@@ -78,6 +93,7 @@ public class Client extends Application {
         connectButton.setOnAction(e -> showConnectDialog());
         reloadButton.setOnAction(e -> loadTracks());
         playButton.setOnAction(e -> openAudioPlayer());
+        addButton.setOnAction(e -> showAddTrackDialog());
         
         listView.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
@@ -108,7 +124,11 @@ public class Client extends Application {
             Logger.close();
         });
         
+        // Привязка состояния кнопок к статусу подключения
         reloadButton.disableProperty().bind(
+            statusLabel.textProperty().isEqualTo("Не подключено")
+        );
+        addButton.disableProperty().bind(
             statusLabel.textProperty().isEqualTo("Не подключено")
         );
     }
@@ -162,6 +182,88 @@ public class Client extends Application {
             Logger.info("Введены параметры подключения: " + currentServer + ":" + currentPort);
             connectToServer();
         });
+    }
+    
+    private void showAddTrackDialog() {
+        Logger.info("Открытие диалога добавления трека");
+        TrackEditDialog dialog = new TrackEditDialog(currentServer, currentPort);
+        dialog.showAndWait();
+        
+        // После закрытия диалога обновляем список треков
+        loadTracks();
+    }
+    
+    private void editSelectedTrack() {
+        MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
+        if (selectedTrack == null) {
+            showAlert("Ошибка", "Выберите трек для редактирования");
+            return;
+        }
+        
+        Logger.info("Открытие диалога редактирования трека: " + selectedTrack.getTitle());
+        TrackEditDialog dialog = new TrackEditDialog(selectedTrack, currentServer, currentPort);
+        dialog.showAndWait();
+        
+        // После закрытия диалога обновляем список треков
+        loadTracks();
+    }
+    
+    private void deleteSelectedTrack() {
+        MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
+        if (selectedTrack == null) {
+            showAlert("Ошибка", "Выберите трек для удаления");
+            return;
+        }
+        
+        Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmDialog.setTitle("Подтверждение удаления");
+        confirmDialog.setHeaderText("Удалить трек?");
+        confirmDialog.setContentText("Вы уверены, что хотите удалить трек \"" + 
+                                   selectedTrack.getTitle() + "\"?");
+        
+        confirmDialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                deleteTrack(selectedTrack.getId());
+            }
+        });
+    }
+    
+    private void deleteTrack(String id) {
+        Logger.info("Удаление трека с ID: " + id);
+        
+        new Thread(() -> {
+            try {
+                Socket socket = new Socket(currentServer, currentPort);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                
+                JSONObject request = new JSONObject();
+                request.put("command", "DELETE_TRACK");
+                request.put("id", id);
+                out.println(request.toString());
+                
+                String response = in.readLine();
+                JSONObject jsonResponse = new JSONObject(response);
+                
+                socket.close();
+                
+                Platform.runLater(() -> {
+                    if (jsonResponse.getString("status").equals("OK")) {
+                        Logger.info("Трек успешно удален");
+                        loadTracks(); // Обновляем список
+                    } else {
+                        showAlert("Ошибка", "Не удалось удалить трек: " + 
+                                jsonResponse.getString("message"));
+                    }
+                });
+                
+            } catch (Exception e) {
+                Logger.error("Ошибка при удалении трека: " + e.getMessage(), e);
+                Platform.runLater(() -> {
+                    showAlert("Ошибка", "Ошибка при удалении трека: " + e.getMessage());
+                });
+            }
+        }).start();
     }
     
     private void connectToServer() {
