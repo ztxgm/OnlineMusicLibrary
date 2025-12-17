@@ -21,7 +21,7 @@ public class TrackEditDialog extends Stage {
     private TextField coverFileField;
     private Button browseAudioButton;
     private Button browseCoverButton;
-    private Button determineDurationButton;
+    private Button editDurationButton;
     private Button saveButton;
     private Button cancelButton;
     
@@ -33,6 +33,9 @@ public class TrackEditDialog extends Stage {
     
     private String serverAddress;
     private int serverPort;
+    
+    private boolean durationDetermined = false;
+    private boolean durationFieldEnabled = false; // Флаг для отслеживания состояния поля
     
     // Конструктор для добавления нового трека
     public TrackEditDialog(String serverAddress, int serverPort) {
@@ -81,9 +84,22 @@ public class TrackEditDialog extends Stage {
         durationField = new TextField();
         durationField.setPromptText("мм:сс (например, 3:45)");
         durationField.setPrefWidth(150);
-        determineDurationButton = new Button("Определить");
-        determineDurationButton.setOnAction(e -> determineAudioDuration());
-        durationBox.getChildren().addAll(durationField, determineDurationButton);
+        durationField.setEditable(false); // ПОЛЕ ИЗНАЧАЛЬНО НЕАКТИВНО
+        durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
+        
+        editDurationButton = new Button("Изменить");
+        editDurationButton.setDisable(true); // Кнопка изначально неактивна
+        editDurationButton.setOnAction(e -> {
+            // Активируем поле для редактирования
+            durationField.setEditable(true);
+            durationField.setStyle(""); // Убираем серый фон
+            durationField.requestFocus();
+            durationFieldEnabled = true;
+            editDurationButton.setDisable(true); // Кнопка становится неактивной после нажатия
+            editDurationButton.setText("Изменяется...");
+        });
+        
+        durationBox.getChildren().addAll(durationField, editDurationButton);
         grid.add(durationBox, 1, 2);
         
         // Исполнитель
@@ -121,7 +137,14 @@ public class TrackEditDialog extends Stage {
         grid.add(buttonBox, 1, 6);
         
         // Обработчики событий
-        browseAudioButton.setOnAction(e -> browseAudioFile());
+        browseAudioButton.setOnAction(e -> {
+            browseAudioFile();
+            // После выбора файла автоматически определяем длительность
+            if (audioFile != null && audioFile.exists()) {
+                determineAudioDuration();
+            }
+        });
+        
         browseCoverButton.setOnAction(e -> browseCoverFile());
         saveButton.setOnAction(e -> saveTrack());
         cancelButton.setOnAction(e -> close());
@@ -152,53 +175,76 @@ public class TrackEditDialog extends Stage {
             audioFile = selectedFile;
             audioFileField.setText(selectedFile.getName());
             
+            // Сбрасываем состояние поля длительности
+            durationField.setEditable(false);
+            durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
+            durationFieldEnabled = false;
+            editDurationButton.setText("Изменить");
+            
             // Автоматически заполняем имя файла обложки
             if (!editMode && (coverFileField.getText() == null || coverFileField.getText().isEmpty())) {
                 String baseName = selectedFile.getName().replaceFirst("[.][^.]+$", "");
                 coverFileField.setText(baseName + ".png");
             }
+            
+            // Сбрасываем флаг определения длительности
+            durationDetermined = false;
         }
     }
     
     private void determineAudioDuration() {
         if (audioFile == null || !audioFile.exists()) {
-            showAlert("Ошибка", "Сначала выберите аудиофайл");
             return;
         }
         
-        Logger.debug("Определение длительности аудиофайла с помощью FFmpeg: " + audioFile.getName());
+        if (durationDetermined) {
+            return; // Уже определили
+        }
+        
+        Logger.debug("Автоматическое определение длительности аудиофайла: " + audioFile.getName());
         
         // Показываем сообщение о процессе определения
         durationField.setText("Определяется...");
-        determineDurationButton.setDisable(true);
+        editDurationButton.setDisable(true); // Кнопка неактивна во время определения
         
         // Определяем длительность в отдельном потоке
         new Thread(() -> {
             try {
                 String duration = getAudioDurationWithFFmpeg(audioFile);
+                durationDetermined = true;
                 
                 javafx.application.Platform.runLater(() -> {
                     if (duration != null && !duration.equals("00:00") && !duration.equals("Определяется...")) {
                         durationField.setText(duration);
-                        Logger.debug("Определена длительность: " + duration + " для файла: " + audioFile.getName());
-                        showAlert("Успех", "Длительность определена: " + duration);
+                        durationField.setEditable(false); // ПОЛЕ ОСТАЕТСЯ НЕАКТИВНЫМ
+                        durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
+                        editDurationButton.setDisable(false); // Активируем кнопку "Изменить"
+                        editDurationButton.setText("Изменить");
+                        Logger.info("Автоматически определена длительность: " + duration + " для файла: " + audioFile.getName());
                     } else {
-                        Logger.warning("Не удалось определить длительность файла: " + audioFile.getName());
-                        showAlert("Ошибка", "Не удалось определить длительность автоматически. Пожалуйста, введите вручную.");
+                        Logger.warning("Не удалось определить длительность файла автоматически: " + audioFile.getName());
                         durationField.setText("00:00");
-                        durationField.requestFocus();
+                        durationField.setEditable(false); // ПОЛЕ ОСТАЕТСЯ НЕАКТИВНЫМ
+                        durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
+                        editDurationButton.setDisable(false); // Активируем кнопку "Изменить"
+                        editDurationButton.setText("Изменить");
+                        showAlert("Внимание", 
+                            "Не удалось определить длительность автоматически. " +
+                            "Нажмите кнопку 'Изменить', чтобы ввести длительность вручную.");
                     }
-                    determineDurationButton.setDisable(false);
                 });
                 
             } catch (Exception e) {
                 Logger.error("Ошибка при определении длительности: " + e.getMessage(), e);
                 javafx.application.Platform.runLater(() -> {
-                    showAlert("Ошибка", "Ошибка при определении длительности: " + e.getMessage() + 
-                             "\nПожалуйста, введите длительность вручную.");
                     durationField.setText("00:00");
-                    durationField.requestFocus();
-                    determineDurationButton.setDisable(false);
+                    durationField.setEditable(false); // ПОЛЕ ОСТАЕТСЯ НЕАКТИВНЫМ
+                    durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
+                    editDurationButton.setDisable(false); // Активируем кнопку "Изменить"
+                    editDurationButton.setText("Изменить");
+                    showAlert("Ошибка", 
+                        "Не удалось определить длительность: " + e.getMessage() + 
+                        "\nНажмите кнопку 'Изменить', чтобы ввести длительность вручную.");
                 });
             }
         }).start();
@@ -257,7 +303,6 @@ public class TrackEditDialog extends Stage {
         } finally {
             if (process != null) {
                 try {
-                    // Исправлено: waitFor возвращает boolean, а не int
                     boolean finished = process.waitFor(5, TimeUnit.SECONDS);
                     if (!finished) {
                         process.destroy();
@@ -310,7 +355,6 @@ public class TrackEditDialog extends Stage {
         } finally {
             if (process != null) {
                 try {
-                    // Исправлено: waitFor возвращает boolean, а не int
                     boolean finished = process.waitFor(5, TimeUnit.SECONDS);
                     if (!finished) {
                         process.destroy();
@@ -324,38 +368,6 @@ public class TrackEditDialog extends Stage {
         }
         
         return null;
-    }
-    
-    private boolean isFFmpegInstalled() {
-        Process process = null;
-        try {
-            ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-version");
-            process = pb.start();
-            
-            // Исправлено: waitFor(long timeout, TimeUnit unit) возвращает boolean
-            boolean finished = process.waitFor(2, TimeUnit.SECONDS);
-            
-            if (finished) {
-                // Если процесс завершился, проверяем код возврата
-                int exitCode = process.exitValue();
-                return exitCode == 0;
-            } else {
-                // Если процесс не завершился в течение таймаута
-                process.destroy();
-                return false;
-            }
-        } catch (Exception e) {
-            Logger.error("Ошибка при проверке установки FFmpeg: " + e.getMessage());
-            return false;
-        } finally {
-            if (process != null) {
-                try {
-                    process.destroy();
-                } catch (Exception e) {
-                    // Игнорируем ошибку при уничтожении процесса
-                }
-            }
-        }
     }
     
     private String formatDurationFromSeconds(double totalSeconds) {
