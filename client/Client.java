@@ -41,8 +41,9 @@ public class Client extends Application {
         Button editButton = new Button("Редактировать");
         Button deleteButton = new Button("Удалить трек");
         
-        playButton.setDisable(true);
+        // Изначально все кнопки, кроме connectButton, отключены
         reloadButton.setDisable(true);
+        playButton.setDisable(true);
         addButton.setDisable(true);
         editButton.setDisable(true);
         deleteButton.setDisable(true);
@@ -108,19 +109,14 @@ public class Client extends Application {
         editButton.setOnAction(e -> editSelectedTrack());
         deleteButton.setOnAction(e -> deleteSelectedTrack());
         
-        // Слушатель выбора трека
+        // Слушатель выбора трека - только для обновления метки
         listView.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
                 if (newValue != null) {
                     selectedTrackLabel.setText(newValue.getTitle() + " (" + newValue.getDuration() + ")");
-                    playButton.setDisable(false);
-                    editButton.setDisable(false);
-                    deleteButton.setDisable(false);
                     Logger.debug("Выбран трек: " + newValue.getTitle());
                 } else {
-                    playButton.setDisable(true);
-                    editButton.setDisable(true);
-                    deleteButton.setDisable(true);
+                    selectedTrackLabel.setText("Выберите трек");
                 }
             }
         );
@@ -143,23 +139,39 @@ public class Client extends Application {
         });
         
         // Привязка состояния кнопок к статусу подключения
-        reloadButton.disableProperty().bind(
-            statusLabel.textProperty().isEqualTo("Не подключено")
-        );
-        addButton.disableProperty().bind(
-            statusLabel.textProperty().isEqualTo("Не подключено")
-        );
-        editButton.disableProperty().bind(
-            statusLabel.textProperty().isEqualTo("Не подключено")
-                .or(listView.getSelectionModel().selectedItemProperty().isNull())
-        );
-        deleteButton.disableProperty().bind(
-            statusLabel.textProperty().isEqualTo("Не подключено")
-                .or(listView.getSelectionModel().selectedItemProperty().isNull())
-        );
-        playButton.disableProperty().bind(
-            statusLabel.textProperty().isEqualTo("Не подключено")
-                .or(listView.getSelectionModel().selectedItemProperty().isNull())
+        // Удаляем все binding и управляем состоянием кнопок через обработчик подключения
+        
+        // Слушатель для изменения статуса подключения
+        statusLabel.textProperty().addListener((observable, oldValue, newValue) -> {
+            boolean isConnected = !newValue.equals("Не подключено");
+            reloadButton.setDisable(!isConnected);
+            addButton.setDisable(!isConnected);
+            
+            // Также управляем состоянием кнопок в зависимости от выбора трека
+            if (!isConnected) {
+                editButton.setDisable(true);
+                deleteButton.setDisable(true);
+                playButton.setDisable(true);
+            } else {
+                MusicTrack selectedTrack = listView.getSelectionModel().getSelectedItem();
+                boolean hasSelection = selectedTrack != null;
+                editButton.setDisable(!hasSelection);
+                deleteButton.setDisable(!hasSelection);
+                playButton.setDisable(!hasSelection);
+            }
+        });
+        
+        // Дополнительный слушатель для выбора трека, чтобы управлять кнопками
+        listView.getSelectionModel().selectedItemProperty().addListener(
+            (observable, oldValue, newValue) -> {
+                boolean isConnected = !statusLabel.getText().equals("Не подключено");
+                if (isConnected) {
+                    boolean hasSelection = newValue != null;
+                    editButton.setDisable(!hasSelection);
+                    deleteButton.setDisable(!hasSelection);
+                    playButton.setDisable(!hasSelection);
+                }
+            }
         );
     }
     

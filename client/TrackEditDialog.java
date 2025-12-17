@@ -5,6 +5,9 @@ import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.scene.media.Media;
+import javafx.scene.media.MediaPlayer;
+import javafx.util.Duration;
 import org.json.JSONObject;
 import java.io.*;
 import java.util.Base64;
@@ -12,7 +15,7 @@ import java.util.Base64;
 public class TrackEditDialog extends Stage {
     private TextField idField;
     private TextField titleField;
-    private TextField durationField;
+    private TextField durationField; // Неактивное поле
     private TextField artistField;
     private TextField audioFileField;
     private TextField coverFileField;
@@ -71,10 +74,12 @@ public class TrackEditDialog extends Stage {
         titleField.setPromptText("Название трека");
         grid.add(titleField, 1, 1);
         
-        // Длительность
+        // Длительность (неактивное поле, определяется автоматически)
         grid.add(new Label("Длительность:"), 0, 2);
         durationField = new TextField();
-        durationField.setPromptText("мм:сс (например, 3:45)");
+        durationField.setPromptText("Определяется автоматически");
+        durationField.setEditable(false); // Поле только для чтения
+        durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
         grid.add(durationField, 1, 2);
         
         // Исполнитель
@@ -87,7 +92,7 @@ public class TrackEditDialog extends Stage {
         grid.add(new Label("Аудиофайл:"), 0, 4);
         HBox audioBox = new HBox(5);
         audioFileField = new TextField();
-        audioFileField.setPromptText("Выберите MP3 файл");
+        audioFileField.setPromptText("Выберите аудиофайл");
         audioFileField.setPrefWidth(250);
         browseAudioButton = new Button("Обзор...");
         audioBox.getChildren().addAll(audioFileField, browseAudioButton);
@@ -97,7 +102,7 @@ public class TrackEditDialog extends Stage {
         grid.add(new Label("Обложка:"), 0, 5);
         HBox coverBox = new HBox(5);
         coverFileField = new TextField();
-        coverFileField.setPromptText("Выберите изображение (PNG/JPG) или оставьте -");
+        coverFileField.setPromptText("Выберите изображение или оставьте -");
         coverFileField.setPrefWidth(250);
         browseCoverButton = new Button("Обзор...");
         coverBox.getChildren().addAll(coverFileField, browseCoverButton);
@@ -134,7 +139,7 @@ public class TrackEditDialog extends Stage {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Выберите аудиофайл");
         fileChooser.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("Аудиофайлы", "*.mp3", "*.wav", "*.ogg", "*.flac"),
+            new FileChooser.ExtensionFilter("Аудиофайлы", "*.mp3", "*.wav", "*.ogg", "*.flac", "*.m4a", "*.aac"),
             new FileChooser.ExtensionFilter("Все файлы", "*.*")
         );
         
@@ -143,34 +148,72 @@ public class TrackEditDialog extends Stage {
             audioFile = selectedFile;
             audioFileField.setText(selectedFile.getName());
             
+            // Определяем длительность аудиофайла
+            determineAudioDuration(selectedFile);
+            
             // Автоматически заполняем имя файла обложки
             if (!editMode && (coverFileField.getText() == null || coverFileField.getText().isEmpty())) {
                 String baseName = selectedFile.getName().replaceFirst("[.][^.]+$", "");
                 coverFileField.setText(baseName + ".png");
             }
-            
-            // Автоматически определяем длительность для MP3 файлов
-            if (!editMode && durationField.getText().isEmpty()) {
-                try {
-                    // Попробуем получить длительность из метаданных MP3
-                    long fileSize = selectedFile.length();
-                    // Примерная оценка: для MP3 примерно 1 МБ = 1 минута
-                    long minutes = fileSize / (1024 * 1024);
-                    if (minutes > 0 && minutes < 60) {
-                        durationField.setText(minutes + ":00");
-                    }
-                } catch (Exception e) {
-                    // Игнорируем ошибки при определении длительности
-                }
-            }
         }
+    }
+    
+    private void determineAudioDuration(File audioFile) {
+        Logger.debug("Определение длительности аудиофайла: " + audioFile.getName());
+        
+        // Показываем сообщение о процессе определения
+        durationField.setText("Определяется...");
+        
+        // Определяем длительность в отдельном потоке
+        new Thread(() -> {
+            try {
+                String fileUrl = audioFile.toURI().toString();
+                
+                javafx.application.Platform.runLater(() -> {
+                    try {
+                        Media media = new Media(fileUrl);
+                        
+                        media.setOnError(() -> {
+                            Logger.warning("Не удалось определить длительность файла: " + audioFile.getName() + 
+                                         ". Ошибка: " + media.getError().getMessage());
+                            durationField.setText("00:00");
+                        });
+                        
+                        // Используем слушатель для определения длительности
+                        media.durationProperty().addListener((observable, oldValue, newValue) -> {
+                            if (newValue != null && newValue.greaterThan(Duration.ZERO) && !newValue.equals(Duration.UNKNOWN)) {
+                                int minutes = (int) newValue.toMinutes();
+                                int seconds = (int) newValue.toSeconds() % 60;
+                                String durationStr = String.format("%02d:%02d", minutes, seconds);
+                                Logger.debug("Определена длительность: " + durationStr + " для файла: " + audioFile.getName());
+                                durationField.setText(durationStr);
+                            } else if (newValue.equals(Duration.UNKNOWN)) {
+                                Logger.warning("Длительность файла неизвестна: " + audioFile.getName());
+                                durationField.setText("00:00");
+                            }
+                        });
+                        
+                    } catch (Exception e) {
+                        Logger.error("Ошибка при создании Media объекта: " + e.getMessage(), e);
+                        durationField.setText("00:00");
+                    }
+                });
+                
+            } catch (Exception e) {
+                Logger.error("Ошибка при определении длительности: " + e.getMessage(), e);
+                javafx.application.Platform.runLater(() -> {
+                    durationField.setText("00:00");
+                });
+            }
+        }).start();
     }
     
     private void browseCoverFile() {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Выберите обложку");
         fileChooser.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("Изображения", "*.png", "*.jpg", "*.jpeg", "*.gif"),
+            new FileChooser.ExtensionFilter("Изображения", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp"),
             new FileChooser.ExtensionFilter("Все файлы", "*.*")
         );
         
@@ -221,23 +264,33 @@ public class TrackEditDialog extends Stage {
     private void saveTrack() {
         // Проверка обязательных полей
         if (idField.getText().isEmpty() || titleField.getText().isEmpty() || 
-            durationField.getText().isEmpty() || artistField.getText().isEmpty() ||
-            audioFileField.getText().isEmpty()) {
+            artistField.getText().isEmpty() || audioFileField.getText().isEmpty()) {
             
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
             alert.setHeaderText("Не все поля заполнены");
-            alert.setContentText("Пожалуйста, заполните все обязательные поля (ID, название, длительность, исполнитель, аудиофайл).");
+            alert.setContentText("Пожалуйста, заполните все обязательные поля (ID, название, исполнитель, аудиофайл).");
+            alert.showAndWait();
+            return;
+        }
+        
+        // Проверка, что длительность определена (не "Определяется...")
+        if (durationField.getText().equals("Определяется...")) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle("Внимание");
+            alert.setHeaderText("Определяется длительность");
+            alert.setContentText("Пожалуйста, подождите пока определится длительность аудиофайла.");
             alert.showAndWait();
             return;
         }
         
         // Проверка формата длительности
-        if (!durationField.getText().matches("\\d+:\\d{2}")) {
+        String durationText = durationField.getText();
+        if (!durationText.equals("00:00") && !durationText.matches("\\d+:\\d{2}")) {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
-            alert.setHeaderText("Некорректный формат длительности");
-            alert.setContentText("Введите длительность в формате мм:сс (например, 3:45)");
+            alert.setHeaderText("Некорректная длительность");
+            alert.setContentText("Длительность должна быть в формате мм:сс (например, 3:45) или 00:00 для неустановленной.");
             alert.showAndWait();
             return;
         }
@@ -292,7 +345,7 @@ public class TrackEditDialog extends Stage {
                     request.put("coverData", "");
                 }
                 
-                Logger.info("Отправка запроса на " + (editMode ? "обновление" : "добавление") + " трека");
+                Logger.info("Отправка запроса на " + (editMode ? "обновление" : "добавление") + " трека: " + titleField.getText());
                 out.println(request.toString());
                 
                 String response = in.readLine();
@@ -302,7 +355,7 @@ public class TrackEditDialog extends Stage {
                 
                 javafx.application.Platform.runLater(() -> {
                     if (jsonResponse.getString("status").equals("OK")) {
-                        Logger.info("Трек успешно " + (editMode ? "обновлен" : "добавлен"));
+                        Logger.info("Трек успешно " + (editMode ? "обновлен" : "добавлен") + ": " + titleField.getText());
                         Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
                         successAlert.setTitle("Успех");
                         successAlert.setHeaderText(null);
