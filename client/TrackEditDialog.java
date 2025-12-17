@@ -5,22 +5,23 @@ import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
-import javafx.scene.media.Media;
-import javafx.scene.media.MediaPlayer;
-import javafx.util.Duration;
 import org.json.JSONObject;
 import java.io.*;
 import java.util.Base64;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class TrackEditDialog extends Stage {
     private TextField idField;
     private TextField titleField;
-    private TextField durationField; // Неактивное поле
+    private TextField durationField;
     private TextField artistField;
     private TextField audioFileField;
     private TextField coverFileField;
     private Button browseAudioButton;
     private Button browseCoverButton;
+    private Button determineDurationButton;
     private Button saveButton;
     private Button cancelButton;
     
@@ -65,7 +66,7 @@ public class TrackEditDialog extends Stage {
         grid.add(new Label("ID:"), 0, 0);
         idField = new TextField();
         idField.setPromptText("Уникальный идентификатор");
-        idField.setDisable(editMode); // Нельзя менять ID при редактировании
+        idField.setDisable(editMode);
         grid.add(idField, 1, 0);
         
         // Название
@@ -74,13 +75,16 @@ public class TrackEditDialog extends Stage {
         titleField.setPromptText("Название трека");
         grid.add(titleField, 1, 1);
         
-        // Длительность (неактивное поле, определяется автоматически)
+        // Длительность
         grid.add(new Label("Длительность:"), 0, 2);
+        HBox durationBox = new HBox(5);
         durationField = new TextField();
-        durationField.setPromptText("Определяется автоматически");
-        durationField.setEditable(false); // Поле только для чтения
-        durationField.setStyle("-fx-background-color: #f0f0f0; -fx-text-fill: #666;");
-        grid.add(durationField, 1, 2);
+        durationField.setPromptText("мм:сс (например, 3:45)");
+        durationField.setPrefWidth(150);
+        determineDurationButton = new Button("Определить");
+        determineDurationButton.setOnAction(e -> determineAudioDuration());
+        durationBox.getChildren().addAll(durationField, determineDurationButton);
+        grid.add(durationBox, 1, 2);
         
         // Исполнитель
         grid.add(new Label("Исполнитель:"), 0, 3);
@@ -122,7 +126,7 @@ public class TrackEditDialog extends Stage {
         saveButton.setOnAction(e -> saveTrack());
         cancelButton.setOnAction(e -> close());
         
-        Scene scene = new Scene(grid, 500, 320);
+        Scene scene = new Scene(grid, 550, 350);
         setScene(scene);
     }
     
@@ -148,9 +152,6 @@ public class TrackEditDialog extends Stage {
             audioFile = selectedFile;
             audioFileField.setText(selectedFile.getName());
             
-            // Определяем длительность аудиофайла
-            determineAudioDuration(selectedFile);
-            
             // Автоматически заполняем имя файла обложки
             if (!editMode && (coverFileField.getText() == null || coverFileField.getText().isEmpty())) {
                 String baseName = selectedFile.getName().replaceFirst("[.][^.]+$", "");
@@ -159,54 +160,215 @@ public class TrackEditDialog extends Stage {
         }
     }
     
-    private void determineAudioDuration(File audioFile) {
-        Logger.debug("Определение длительности аудиофайла: " + audioFile.getName());
+    private void determineAudioDuration() {
+        if (audioFile == null || !audioFile.exists()) {
+            showAlert("Ошибка", "Сначала выберите аудиофайл");
+            return;
+        }
+        
+        Logger.debug("Определение длительности аудиофайла с помощью FFmpeg: " + audioFile.getName());
         
         // Показываем сообщение о процессе определения
         durationField.setText("Определяется...");
+        determineDurationButton.setDisable(true);
         
         // Определяем длительность в отдельном потоке
         new Thread(() -> {
             try {
-                String fileUrl = audioFile.toURI().toString();
+                String duration = getAudioDurationWithFFmpeg(audioFile);
                 
                 javafx.application.Platform.runLater(() -> {
-                    try {
-                        Media media = new Media(fileUrl);
-                        
-                        media.setOnError(() -> {
-                            Logger.warning("Не удалось определить длительность файла: " + audioFile.getName() + 
-                                         ". Ошибка: " + media.getError().getMessage());
-                            durationField.setText("00:00");
-                        });
-                        
-                        // Используем слушатель для определения длительности
-                        media.durationProperty().addListener((observable, oldValue, newValue) -> {
-                            if (newValue != null && newValue.greaterThan(Duration.ZERO) && !newValue.equals(Duration.UNKNOWN)) {
-                                int minutes = (int) newValue.toMinutes();
-                                int seconds = (int) newValue.toSeconds() % 60;
-                                String durationStr = String.format("%02d:%02d", minutes, seconds);
-                                Logger.debug("Определена длительность: " + durationStr + " для файла: " + audioFile.getName());
-                                durationField.setText(durationStr);
-                            } else if (newValue.equals(Duration.UNKNOWN)) {
-                                Logger.warning("Длительность файла неизвестна: " + audioFile.getName());
-                                durationField.setText("00:00");
-                            }
-                        });
-                        
-                    } catch (Exception e) {
-                        Logger.error("Ошибка при создании Media объекта: " + e.getMessage(), e);
+                    if (duration != null && !duration.equals("00:00") && !duration.equals("Определяется...")) {
+                        durationField.setText(duration);
+                        Logger.debug("Определена длительность: " + duration + " для файла: " + audioFile.getName());
+                        showAlert("Успех", "Длительность определена: " + duration);
+                    } else {
+                        Logger.warning("Не удалось определить длительность файла: " + audioFile.getName());
+                        showAlert("Ошибка", "Не удалось определить длительность автоматически. Пожалуйста, введите вручную.");
                         durationField.setText("00:00");
+                        durationField.requestFocus();
                     }
+                    determineDurationButton.setDisable(false);
                 });
                 
             } catch (Exception e) {
                 Logger.error("Ошибка при определении длительности: " + e.getMessage(), e);
                 javafx.application.Platform.runLater(() -> {
+                    showAlert("Ошибка", "Ошибка при определении длительности: " + e.getMessage() + 
+                             "\nПожалуйста, введите длительность вручную.");
                     durationField.setText("00:00");
+                    durationField.requestFocus();
+                    determineDurationButton.setDisable(false);
                 });
             }
         }).start();
+    }
+    
+    private String getAudioDurationWithFFmpeg(File audioFile) {
+        // Сначала пробуем получить длительность через ffprobe (основной способ)
+        String duration = getDurationWithFFprobe(audioFile);
+        if (duration != null && !duration.equals("00:00")) {
+            return duration;
+        }
+        
+        // Если ffprobe не сработал, пробуем через ffmpeg (альтернативный способ)
+        duration = getDurationWithFFmpeg(audioFile);
+        if (duration != null && !duration.equals("00:00")) {
+            return duration;
+        }
+        
+        return "00:00";
+    }
+    
+    private String getDurationWithFFprobe(File audioFile) {
+        Process process = null;
+        try {
+            // Команда для получения информации о файле через ffprobe
+            ProcessBuilder pb = new ProcessBuilder(
+                "ffprobe", 
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                audioFile.getAbsolutePath()
+            );
+            
+            Logger.debug("Выполнение команды ffprobe: " + String.join(" ", pb.command()));
+            
+            process = pb.start();
+            
+            // Читаем вывод ffprobe
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty()) {
+                    try {
+                        double duration = Double.parseDouble(line.trim());
+                        return formatDurationFromSeconds(duration);
+                    } catch (NumberFormatException e) {
+                        Logger.warning("Не удалось преобразовать длительность из ffprobe: " + line);
+                        return null;
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            Logger.error("Ошибка при использовании ffprobe: " + e.getMessage());
+        } finally {
+            if (process != null) {
+                try {
+                    // Исправлено: waitFor возвращает boolean, а не int
+                    boolean finished = process.waitFor(5, TimeUnit.SECONDS);
+                    if (!finished) {
+                        process.destroy();
+                        Logger.warning("Процесс ffprobe не завершился за 5 секунд");
+                    }
+                } catch (InterruptedException e) {
+                    Logger.error("Процесс ffprobe был прерван: " + e.getMessage());
+                    process.destroy();
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    private String getDurationWithFFmpeg(File audioFile) {
+        Process process = null;
+        try {
+            // Альтернативный способ, если ffprobe не сработал
+            ProcessBuilder pb = new ProcessBuilder(
+                "ffmpeg", 
+                "-i", audioFile.getAbsolutePath(),
+                "-f", "null", "-"
+            );
+            
+            Logger.debug("Выполнение команды ffmpeg: " + String.join(" ", pb.command()));
+            
+            process = pb.start();
+            BufferedReader errorReader = new BufferedReader(
+                new InputStreamReader(process.getErrorStream())
+            );
+            
+            Pattern pattern = Pattern.compile("Duration: (\\d{2}):(\\d{2}):(\\d{2}\\.\\d+)");
+            String line;
+            
+            while ((line = errorReader.readLine()) != null) {
+                Matcher matcher = pattern.matcher(line);
+                if (matcher.find()) {
+                    int hours = Integer.parseInt(matcher.group(1));
+                    int minutes = Integer.parseInt(matcher.group(2));
+                    double seconds = Double.parseDouble(matcher.group(3));
+                    
+                    double totalSeconds = hours * 3600 + minutes * 60 + seconds;
+                    return formatDurationFromSeconds(totalSeconds);
+                }
+            }
+            
+        } catch (Exception e) {
+            Logger.error("Ошибка при использовании ffmpeg: " + e.getMessage());
+        } finally {
+            if (process != null) {
+                try {
+                    // Исправлено: waitFor возвращает boolean, а не int
+                    boolean finished = process.waitFor(5, TimeUnit.SECONDS);
+                    if (!finished) {
+                        process.destroy();
+                        Logger.warning("Процесс ffmpeg не завершился за 5 секунд");
+                    }
+                } catch (InterruptedException e) {
+                    Logger.error("Процесс ffmpeg был прерван: " + e.getMessage());
+                    process.destroy();
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    private boolean isFFmpegInstalled() {
+        Process process = null;
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-version");
+            process = pb.start();
+            
+            // Исправлено: waitFor(long timeout, TimeUnit unit) возвращает boolean
+            boolean finished = process.waitFor(2, TimeUnit.SECONDS);
+            
+            if (finished) {
+                // Если процесс завершился, проверяем код возврата
+                int exitCode = process.exitValue();
+                return exitCode == 0;
+            } else {
+                // Если процесс не завершился в течение таймаута
+                process.destroy();
+                return false;
+            }
+        } catch (Exception e) {
+            Logger.error("Ошибка при проверке установки FFmpeg: " + e.getMessage());
+            return false;
+        } finally {
+            if (process != null) {
+                try {
+                    process.destroy();
+                } catch (Exception e) {
+                    // Игнорируем ошибку при уничтожении процесса
+                }
+            }
+        }
+    }
+    
+    private String formatDurationFromSeconds(double totalSeconds) {
+        try {
+            int total = (int) Math.round(totalSeconds);
+            int minutes = total / 60;
+            int seconds = total % 60;
+            
+            return String.format("%d:%02d", minutes, seconds);
+        } catch (Exception e) {
+            Logger.error("Ошибка при форматировании секунд: " + e.getMessage());
+            return "00:00";
+        }
     }
     
     private void browseCoverFile() {
@@ -264,38 +426,29 @@ public class TrackEditDialog extends Stage {
     private void saveTrack() {
         // Проверка обязательных полей
         if (idField.getText().isEmpty() || titleField.getText().isEmpty() || 
-            artistField.getText().isEmpty() || audioFileField.getText().isEmpty()) {
+            durationField.getText().isEmpty() || artistField.getText().isEmpty() ||
+            audioFileField.getText().isEmpty()) {
             
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
             alert.setHeaderText("Не все поля заполнены");
-            alert.setContentText("Пожалуйста, заполните все обязательные поля (ID, название, исполнитель, аудиофайл).");
-            alert.showAndWait();
-            return;
-        }
-        
-        // Проверка, что длительность определена (не "Определяется...")
-        if (durationField.getText().equals("Определяется...")) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("Внимание");
-            alert.setHeaderText("Определяется длительность");
-            alert.setContentText("Пожалуйста, подождите пока определится длительность аудиофайла.");
+            alert.setContentText("Пожалуйста, заполните все обязательные поля (ID, название, длительность, исполнитель, аудиофайл).");
             alert.showAndWait();
             return;
         }
         
         // Проверка формата длительности
         String durationText = durationField.getText();
-        if (!durationText.equals("00:00") && !durationText.matches("\\d+:\\d{2}")) {
+        if (!durationText.matches("\\d+:\\d{2}")) {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
-            alert.setHeaderText("Некорректная длительность");
-            alert.setContentText("Длительность должна быть в формате мм:сс (например, 3:45) или 00:00 для неустановленной.");
+            alert.setHeaderText("Некорректный формат длительности");
+            alert.setContentText("Введите длительность в формате мм:сс (например, 3:45)");
             alert.showAndWait();
             return;
         }
         
-        // Проверка существования аудиофайла (кроме случая редактирования без изменения файла)
+        // Проверка существования аудиофайла
         if (!editMode && (audioFile == null || !audioFile.exists())) {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
@@ -382,5 +535,15 @@ public class TrackEditDialog extends Stage {
                 });
             }
         }).start();
+    }
+    
+    private void showAlert(String title, String message) {
+        javafx.application.Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(message);
+            alert.showAndWait();
+        });
     }
 }
