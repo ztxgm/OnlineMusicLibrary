@@ -46,7 +46,7 @@ public class TrackEditDialog extends Stage {
         this.serverPort = serverPort;
         editMode = true;
         originalTrack = track;
-        setTitle("Редактировать трек");
+        setTitle("Редактировать трек: " + track.getTitle());
         initModality(Modality.APPLICATION_MODAL);
         setupUI();
         fillFields(track);
@@ -62,6 +62,7 @@ public class TrackEditDialog extends Stage {
         grid.add(new Label("ID:"), 0, 0);
         idField = new TextField();
         idField.setPromptText("Уникальный идентификатор");
+        idField.setDisable(editMode); // Нельзя менять ID при редактировании
         grid.add(idField, 1, 0);
         
         // Название
@@ -87,7 +88,7 @@ public class TrackEditDialog extends Stage {
         HBox audioBox = new HBox(5);
         audioFileField = new TextField();
         audioFileField.setPromptText("Выберите MP3 файл");
-        audioFileField.setPrefWidth(200);
+        audioFileField.setPrefWidth(250);
         browseAudioButton = new Button("Обзор...");
         audioBox.getChildren().addAll(audioFileField, browseAudioButton);
         grid.add(audioBox, 1, 4);
@@ -96,8 +97,8 @@ public class TrackEditDialog extends Stage {
         grid.add(new Label("Обложка:"), 0, 5);
         HBox coverBox = new HBox(5);
         coverFileField = new TextField();
-        coverFileField.setPromptText("Выберите изображение (PNG/JPG)");
-        coverFileField.setPrefWidth(200);
+        coverFileField.setPromptText("Выберите изображение (PNG/JPG) или оставьте -");
+        coverFileField.setPrefWidth(250);
         browseCoverButton = new Button("Обзор...");
         coverBox.getChildren().addAll(coverFileField, browseCoverButton);
         grid.add(coverBox, 1, 5);
@@ -105,7 +106,7 @@ public class TrackEditDialog extends Stage {
         // Кнопки
         HBox buttonBox = new HBox(10);
         buttonBox.setPadding(new Insets(20, 0, 0, 0));
-        saveButton = new Button(editMode ? "Сохранить" : "Добавить");
+        saveButton = new Button(editMode ? "Сохранить изменения" : "Добавить трек");
         cancelButton = new Button("Отмена");
         buttonBox.getChildren().addAll(saveButton, cancelButton);
         grid.add(buttonBox, 1, 6);
@@ -116,25 +117,24 @@ public class TrackEditDialog extends Stage {
         saveButton.setOnAction(e -> saveTrack());
         cancelButton.setOnAction(e -> close());
         
-        Scene scene = new Scene(grid, 400, 300);
+        Scene scene = new Scene(grid, 500, 320);
         setScene(scene);
     }
     
     private void fillFields(Client.MusicTrack track) {
         idField.setText(track.getId());
-        idField.setDisable(true); // Нельзя менять ID при редактировании
         titleField.setText(track.getTitle());
         durationField.setText(track.getDuration());
         artistField.setText(track.getArtist());
         audioFileField.setText(track.getFilename());
-        coverFileField.setText(track.getCover());
+        coverFileField.setText(track.getCover().equals("-") ? "" : track.getCover());
     }
     
     private void browseAudioFile() {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Выберите аудиофайл");
         fileChooser.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("Аудиофайлы", "*.mp3", "*.wav", "*.ogg"),
+            new FileChooser.ExtensionFilter("Аудиофайлы", "*.mp3", "*.wav", "*.ogg", "*.flac"),
             new FileChooser.ExtensionFilter("Все файлы", "*.*")
         );
         
@@ -148,6 +148,21 @@ public class TrackEditDialog extends Stage {
                 String baseName = selectedFile.getName().replaceFirst("[.][^.]+$", "");
                 coverFileField.setText(baseName + ".png");
             }
+            
+            // Автоматически определяем длительность для MP3 файлов
+            if (!editMode && durationField.getText().isEmpty()) {
+                try {
+                    // Попробуем получить длительность из метаданных MP3
+                    long fileSize = selectedFile.length();
+                    // Примерная оценка: для MP3 примерно 1 МБ = 1 минута
+                    long minutes = fileSize / (1024 * 1024);
+                    if (minutes > 0 && minutes < 60) {
+                        durationField.setText(minutes + ":00");
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки при определении длительности
+                }
+            }
         }
     }
     
@@ -155,7 +170,7 @@ public class TrackEditDialog extends Stage {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Выберите обложку");
         fileChooser.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("Изображения", "*.png", "*.jpg", "*.jpeg"),
+            new FileChooser.ExtensionFilter("Изображения", "*.png", "*.jpg", "*.jpeg", "*.gif"),
             new FileChooser.ExtensionFilter("Все файлы", "*.*")
         );
         
@@ -212,7 +227,7 @@ public class TrackEditDialog extends Stage {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Ошибка");
             alert.setHeaderText("Не все поля заполнены");
-            alert.setContentText("Пожалуйста, заполните все обязательные поля.");
+            alert.setContentText("Пожалуйста, заполните все обязательные поля (ID, название, длительность, исполнитель, аудиофайл).");
             alert.showAndWait();
             return;
         }
@@ -248,17 +263,17 @@ public class TrackEditDialog extends Stage {
                 
                 if (editMode) {
                     request.put("command", "UPDATE_TRACK");
-                    request.put("id", idField.getText());
                 } else {
                     request.put("command", "ADD_TRACK");
-                    request.put("id", idField.getText());
                 }
                 
+                request.put("id", idField.getText());
                 request.put("title", titleField.getText());
                 request.put("duration", durationField.getText());
                 request.put("artist", artistField.getText());
                 request.put("audioFilename", audioFileField.getText());
-                request.put("coverFilename", coverFileField.getText().isEmpty() ? "-" : coverFileField.getText());
+                request.put("coverFilename", 
+                    coverFileField.getText().isEmpty() ? "-" : coverFileField.getText());
                 
                 // Кодируем и добавляем аудиофайл
                 if (audioFile != null) {
@@ -277,6 +292,7 @@ public class TrackEditDialog extends Stage {
                     request.put("coverData", "");
                 }
                 
+                Logger.info("Отправка запроса на " + (editMode ? "обновление" : "добавление") + " трека");
                 out.println(request.toString());
                 
                 String response = in.readLine();
@@ -287,6 +303,11 @@ public class TrackEditDialog extends Stage {
                 javafx.application.Platform.runLater(() -> {
                     if (jsonResponse.getString("status").equals("OK")) {
                         Logger.info("Трек успешно " + (editMode ? "обновлен" : "добавлен"));
+                        Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
+                        successAlert.setTitle("Успех");
+                        successAlert.setHeaderText(null);
+                        successAlert.setContentText(jsonResponse.getString("message"));
+                        successAlert.showAndWait();
                         close();
                     } else {
                         Alert alert = new Alert(Alert.AlertType.ERROR);

@@ -32,17 +32,27 @@ public class Client extends Application {
         VBox root = new VBox(10);
         root.setPadding(new Insets(10));
         
+        // Панель управления
         HBox controlPanel = new HBox(10);
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("Обновить");
         Button playButton = new Button("Воспроизвести");
         Button addButton = new Button("Добавить трек");
+        Button editButton = new Button("Редактировать");
+        Button deleteButton = new Button("Удалить трек");
+        
         playButton.setDisable(true);
         reloadButton.setDisable(true);
         addButton.setDisable(true);
+        editButton.setDisable(true);
+        deleteButton.setDisable(true);
         
-        controlPanel.getChildren().addAll(connectButton, reloadButton, playButton, addButton, statusLabel);
+        controlPanel.getChildren().addAll(
+            connectButton, reloadButton, playButton, addButton, 
+            editButton, deleteButton, statusLabel
+        );
         
+        // Настройка ListView
         listView.setCellFactory(param -> new ListCell<MusicTrack>() {
             @Override
             protected void updateItem(MusicTrack item, boolean empty) {
@@ -67,7 +77,6 @@ public class Client extends Application {
         ContextMenu contextMenu = new ContextMenu();
         MenuItem editMenuItem = new MenuItem("Редактировать");
         MenuItem deleteMenuItem = new MenuItem("Удалить");
-        
         contextMenu.getItems().addAll(editMenuItem, deleteMenuItem);
         listView.setContextMenu(contextMenu);
         
@@ -75,6 +84,7 @@ public class Client extends Application {
         editMenuItem.setOnAction(e -> editSelectedTrack());
         deleteMenuItem.setOnAction(e -> deleteSelectedTrack());
         
+        // Панель информации о треке
         VBox infoPanel = new VBox(5);
         infoPanel.setPadding(new Insets(10));
         infoPanel.setStyle("-fx-border-color: gray; -fx-border-width: 1;");
@@ -90,26 +100,34 @@ public class Client extends Application {
         
         infoPanel.getChildren().addAll(infoLabel, trackInfoBox);
         
+        // Обработчики кнопок
         connectButton.setOnAction(e -> showConnectDialog());
         reloadButton.setOnAction(e -> loadTracks());
         playButton.setOnAction(e -> openAudioPlayer());
         addButton.setOnAction(e -> showAddTrackDialog());
+        editButton.setOnAction(e -> editSelectedTrack());
+        deleteButton.setOnAction(e -> deleteSelectedTrack());
         
+        // Слушатель выбора трека
         listView.getSelectionModel().selectedItemProperty().addListener(
             (observable, oldValue, newValue) -> {
                 if (newValue != null) {
                     selectedTrackLabel.setText(newValue.getTitle() + " (" + newValue.getDuration() + ")");
                     playButton.setDisable(false);
+                    editButton.setDisable(false);
+                    deleteButton.setDisable(false);
                     Logger.debug("Выбран трек: " + newValue.getTitle());
                 } else {
                     playButton.setDisable(true);
+                    editButton.setDisable(true);
+                    deleteButton.setDisable(true);
                 }
             }
         );
         
         root.getChildren().addAll(controlPanel, listView, infoPanel);
         
-        Scene scene = new Scene(root, 600, 400);
+        Scene scene = new Scene(root, 700, 450);
         primaryStage.setTitle("OnlineMusicLibrary");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -130,6 +148,18 @@ public class Client extends Application {
         );
         addButton.disableProperty().bind(
             statusLabel.textProperty().isEqualTo("Не подключено")
+        );
+        editButton.disableProperty().bind(
+            statusLabel.textProperty().isEqualTo("Не подключено")
+                .or(listView.getSelectionModel().selectedItemProperty().isNull())
+        );
+        deleteButton.disableProperty().bind(
+            statusLabel.textProperty().isEqualTo("Не подключено")
+                .or(listView.getSelectionModel().selectedItemProperty().isNull())
+        );
+        playButton.disableProperty().bind(
+            statusLabel.textProperty().isEqualTo("Не подключено")
+                .or(listView.getSelectionModel().selectedItemProperty().isNull())
         );
     }
     
@@ -219,7 +249,11 @@ public class Client extends Application {
         confirmDialog.setTitle("Подтверждение удаления");
         confirmDialog.setHeaderText("Удалить трек?");
         confirmDialog.setContentText("Вы уверены, что хотите удалить трек \"" + 
-                                   selectedTrack.getTitle() + "\"?");
+                                   selectedTrack.getTitle() + "\"?\n" +
+                                   "При этом будут удалены:\n" +
+                                   "• Аудиофайл: " + selectedTrack.getFilename() + "\n" +
+                                   "• Обложка: " + 
+                                   (selectedTrack.getCover().equals("-") ? "нет" : selectedTrack.getCover()));
         
         confirmDialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
@@ -247,9 +281,14 @@ public class Client extends Application {
                 
                 socket.close();
                 
-                Platform.runLater(() -> {
+                javafx.application.Platform.runLater(() -> {
                     if (jsonResponse.getString("status").equals("OK")) {
                         Logger.info("Трек успешно удален");
+                        showAlert("Успех", "Трек успешно удален\n" +
+                                (jsonResponse.has("audioDeleted") && jsonResponse.getBoolean("audioDeleted") ? 
+                                    "Аудиофайл удален\n" : "") +
+                                (jsonResponse.has("coverDeleted") && jsonResponse.getBoolean("coverDeleted") ? 
+                                    "Обложка удалена" : ""));
                         loadTracks(); // Обновляем список
                     } else {
                         showAlert("Ошибка", "Не удалось удалить трек: " + 
@@ -259,7 +298,7 @@ public class Client extends Application {
                 
             } catch (Exception e) {
                 Logger.error("Ошибка при удалении трека: " + e.getMessage(), e);
-                Platform.runLater(() -> {
+                javafx.application.Platform.runLater(() -> {
                     showAlert("Ошибка", "Ошибка при удалении трека: " + e.getMessage());
                 });
             }
@@ -379,7 +418,7 @@ public class Client extends Application {
     private void showAlert(String title, String message) {
         Logger.warning("Показать alert: " + title + " - " + message);
         
-        Alert alert = new Alert(Alert.AlertType.ERROR);
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);

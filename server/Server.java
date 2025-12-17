@@ -383,14 +383,14 @@ public class Server {
                     return;
                 }
                 
-                // Удаляем старые файлы, если имена изменились
+                // Сохраняем старые имена файлов
                 String oldAudioFilename = record.getAudioFilename();
                 String oldCoverFilename = record.getCoverFilename();
                 String newAudioFilename = request.getString("audioFilename");
                 String newCoverFilename = request.optString("coverFilename", "-");
                 
                 // Обновляем аудиофайл
-                if (request.has("audioData")) {
+                if (request.has("audioData") && !request.getString("audioData").isEmpty()) {
                     String audioDataBase64 = request.getString("audioData");
                     byte[] audioData = Base64.getDecoder().decode(audioDataBase64);
                     
@@ -459,8 +459,8 @@ public class Server {
                 }
                 
                 // Удаляем файлы
-                deleteFile(MUSIC_DIR, record.getAudioFilename());
-                deleteFile(COVERS_DIR, record.getCoverFilename());
+                boolean audioDeleted = deleteFile(MUSIC_DIR, record.getAudioFilename());
+                boolean coverDeleted = deleteFile(COVERS_DIR, record.getCoverFilename());
                 
                 // Удаляем запись
                 musicData.remove(record);
@@ -470,6 +470,8 @@ public class Server {
                 
                 response.put("status", "OK");
                 response.put("message", "Трек успешно удален");
+                response.put("audioDeleted", audioDeleted);
+                response.put("coverDeleted", coverDeleted);
                 Logger.info("Трек удален: " + record.getTitle() + " (ID: " + id + ")");
                 
             } catch (Exception e) {
