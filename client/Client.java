@@ -60,7 +60,7 @@ public class Client extends Application {
         Button playButton = new Button("▶");
         Button addButton = new Button("+");
         Button editButton = new Button("✎");
-        Button deleteButton = new Button("🗑");c
+        Button deleteButton = new Button("🗑");
         
         // Добавляем всплывающие подсказки
         Tooltip reloadTooltip = new Tooltip("Обновить список треков");

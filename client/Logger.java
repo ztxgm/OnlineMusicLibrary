@@ -3,7 +3,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 public class Logger {
-    private static final String LOG_FILE = "server.log";
+    private static final String LOG_FILE = "client.log";
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     private static PrintWriter logWriter;
     
@@ -65,7 +65,7 @@ public class Logger {
     }
     
     private static boolean isDebugEnabled() {
-        return "true".equals(System.getProperty("server.debug", "false"));
+        return "true".equals(System.getProperty("client.debug", "false"));
     }
     
     public static void close() {
