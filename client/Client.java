@@ -36,8 +36,8 @@ public class Client extends Application {
         Button connectButton = new Button("Подключиться");
         Button reloadButton = new Button("🗘");
         Button playButton = new Button("▶");
-        Button addButton = new Button("➕");
-        Button editButton = new Button("✏");
+        Button addButton = new Button("+");
+        Button editButton = new Button("✎");
         Button deleteButton = new Button("🗑");
         
         // Добавляем всплывающие подсказки
@@ -515,3 +515,4 @@ public class Client extends Application {
         }
     }
 }
+
