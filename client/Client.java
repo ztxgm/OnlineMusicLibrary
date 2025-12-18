@@ -1,5 +1,4 @@
 import javafx.application.Application;
-import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -35,11 +34,31 @@ public class Client extends Application {
         // Панель управления
         HBox controlPanel = new HBox(10);
         Button connectButton = new Button("Подключиться");
-        Button reloadButton = new Button("Обновить");
-        Button playButton = new Button("Воспроизвести");
-        Button addButton = new Button("Добавить трек");
-        Button editButton = new Button("Редактировать");
-        Button deleteButton = new Button("Удалить трек");
+        Button reloadButton = new Button("🗘");
+        Button playButton = new Button("▶");
+        Button addButton = new Button("➕");
+        Button editButton = new Button("✏");
+        Button deleteButton = new Button("🗑");
+        
+        // Добавляем всплывающие подсказки
+        Tooltip reloadTooltip = new Tooltip("Обновить список треков");
+        Tooltip playTooltip = new Tooltip("Воспроизвести выбранный трек");
+        Tooltip addTooltip = new Tooltip("Добавить новый трек");
+        Tooltip editTooltip = new Tooltip("Редактировать выбранный трек");
+        Tooltip deleteTooltip = new Tooltip("Удалить выбранный трек");
+        
+        reloadButton.setTooltip(reloadTooltip);
+        playButton.setTooltip(playTooltip);
+        addButton.setTooltip(addTooltip);
+        editButton.setTooltip(editTooltip);
+        deleteButton.setTooltip(deleteTooltip);
+        
+        // Увеличиваем размер кнопок для лучшей видимости символов
+        reloadButton.setPrefWidth(40);
+        playButton.setPrefWidth(40);
+        addButton.setPrefWidth(40);
+        editButton.setPrefWidth(40);
+        deleteButton.setPrefWidth(40);
         
         // Изначально все кнопки, кроме connectButton, отключены
         reloadButton.setDisable(true);
@@ -76,8 +95,8 @@ public class Client extends Application {
         
         // Контекстное меню для правого клика
         ContextMenu contextMenu = new ContextMenu();
-        MenuItem editMenuItem = new MenuItem("Редактировать");
-        MenuItem deleteMenuItem = new MenuItem("Удалить");
+        MenuItem editMenuItem = new MenuItem("✏ Редактировать");
+        MenuItem deleteMenuItem = new MenuItem("🗑 Удалить");
         contextMenu.getItems().addAll(editMenuItem, deleteMenuItem);
         listView.setContextMenu(contextMenu);
         
@@ -137,9 +156,6 @@ public class Client extends Application {
             }
             Logger.close();
         });
-        
-        // Привязка состояния кнопок к статусу подключения
-        // Удаляем все binding и управляем состоянием кнопок через обработчик подключения
         
         // Слушатель для изменения статуса подключения
         statusLabel.textProperty().addListener((observable, oldValue, newValue) -> {
@@ -344,7 +360,7 @@ public class Client extends Application {
     }
     
     private void loadTracks() {
-        Logger.info("Загрузка списка треков с сервера");
+        Logger.info("Загрузка списка треков с сервером");
         
         if (out == null) {
             Logger.error("Нет подключения к серверу для загрузки треков");
