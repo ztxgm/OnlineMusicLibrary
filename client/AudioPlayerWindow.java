@@ -44,6 +44,9 @@ public class AudioPlayerWindow {
     private static final int WINDOW_WIDTH = COVER_SIZE;
     private static final int WINDOW_HEIGHT = 550;
     
+    // Кэш для обложек
+    private static final java.util.Map<String, Image> coverCache = new java.util.HashMap<>();
+    
     public AudioPlayerWindow(Client.MusicTrack track, int trackIndex, 
                            List<Client.MusicTrack> trackList, 
                            String serverAddress, int serverPort,
@@ -261,7 +264,8 @@ public class AudioPlayerWindow {
         Scene scene = new Scene(root);
         stage.setScene(scene);
         
-        loadCover(currentTrack.getCover());
+        // Загружаем обложку немедленно
+        loadCover(currentTrack.getCover(), currentTrack.getId());
         selectInList(currentTrackIndex);
         
         Logger.info("Окно аудиоплеера создано для трека: " + currentTrack.getTitle());
@@ -385,22 +389,32 @@ public class AudioPlayerWindow {
         }).start();
     }
     
-    private void loadCover(String coverFilename) {
-        Logger.debug("Загрузка обложки: " + coverFilename);
+    private void loadCover(String coverFilename, String trackId) {
+        Logger.debug("Загрузка обложки: " + coverFilename + " для трека ID: " + trackId);
+        
         if (coverFilename == null || coverFilename.isEmpty() || coverFilename.equals("-")) {
-            Logger.debug("Используется обложка по умолчанию");
-            loadDefaultCover();
+            Logger.debug("Используется обложка по умолчанию для трека ID: " + trackId);
+            loadDefaultCover(trackId);
         } else {
-            loadCoverFile(coverFilename);
+            // Проверяем кэш
+            String cacheKey = trackId + "_" + coverFilename;
+            if (coverCache.containsKey(cacheKey)) {
+                Logger.debug("Обложка найдена в кэше для трека ID: " + trackId);
+                Image cachedImage = coverCache.get(cacheKey);
+                coverImageView.setImage(cachedImage);
+            } else {
+                loadCoverFile(coverFilename, trackId);
+            }
         }
     }
     
-    private void loadCoverFile(String coverFilename) {
-        Logger.debug("Загрузка файла обложки: " + coverFilename);
+    private void loadCoverFile(String coverFilename, String trackId) {
+        Logger.debug("Загрузка файла обложки: " + coverFilename + " для трека ID: " + trackId);
         
         new Thread(() -> {
             try {
                 Socket socket = new Socket(serverAddress, serverPort);
+                socket.setSoTimeout(10000); // Таймаут 10 секунд
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 
@@ -413,11 +427,18 @@ public class AudioPlayerWindow {
                 
                 // Получаем JSON ответ о файле
                 String response = in.readLine();
+                if (response == null) {
+                    Logger.warning("Пустой ответ от сервера при запросе обложки: " + coverFilename);
+                    Platform.runLater(() -> loadDefaultCover(trackId));
+                    socket.close();
+                    return;
+                }
+                
                 JSONObject jsonResponse = new JSONObject(response);
                 
                 if (!jsonResponse.getString("status").equals("FILE")) {
-                    Logger.warning("Не удалось получить обложку: " + coverFilename);
-                    Platform.runLater(() -> loadDefaultCover());
+                    Logger.warning("Не удалось получить обложку: " + coverFilename + ", статус: " + jsonResponse.getString("status"));
+                    Platform.runLater(() -> loadDefaultCover(trackId));
                     socket.close();
                     return;
                 }
@@ -449,50 +470,66 @@ public class AudioPlayerWindow {
                 Platform.runLater(() -> {
                     try {
                         Image image = new Image(tempFile.toURI().toString(), COVER_SIZE, COVER_SIZE, true, true, true);
-                        coverImageView.setImage(image);
-                        Logger.debug("Обложка установлена: " + coverFilename);
+                        
+                        // Кэшируем изображение
+                        String cacheKey = trackId + "_" + coverFilename;
+                        coverCache.put(cacheKey, image);
+                        
+                        // Проверяем, что это все еще актуальный трек
+                        if (currentTrack != null && currentTrack.getId().equals(trackId)) {
+                            coverImageView.setImage(image);
+                            Logger.debug("Обложка установлена: " + coverFilename + " для трека ID: " + trackId);
+                        } else {
+                            Logger.debug("Обложка загружена для другого трека, игнорируем");
+                        }
                     } catch (Exception e) {
                         Logger.error("Ошибка загрузки обложки: " + e.getMessage());
-                        loadDefaultCover();
+                        loadDefaultCover(trackId);
                     }
                 });
                 
             } catch (Exception e) {
                 Logger.error("Ошибка загрузки обложки: " + e.getMessage(), e);
-                Platform.runLater(() -> loadDefaultCover());
+                Platform.runLater(() -> loadDefaultCover(trackId));
             }
         }).start();
     }
     
-    private void loadDefaultCover() {
-        Logger.debug("Создание обложки по умолчанию");
+    private void loadDefaultCover(String trackId) {
+        Logger.debug("Создание обложки по умолчанию для трека ID: " + trackId);
         
-        javafx.scene.canvas.Canvas canvas = new javafx.scene.canvas.Canvas(COVER_SIZE, COVER_SIZE);
-        javafx.scene.canvas.GraphicsContext gc = canvas.getGraphicsContext2D();
-        
-        for (int y = 0; y < COVER_SIZE; y++) {
-            for (int x = 0; x < COVER_SIZE; x++) {
-                double r = 0.1 + (0.3 * x / COVER_SIZE);
-                double g = 0.1 + (0.3 * y / COVER_SIZE);
-                double b = 0.4;
-                gc.setFill(javafx.scene.paint.Color.color(r, g, b));
-                gc.fillRect(x, y, 1, 1);
+        Platform.runLater(() -> {
+            if (currentTrack != null && currentTrack.getId().equals(trackId)) {
+                javafx.scene.canvas.Canvas canvas = new javafx.scene.canvas.Canvas(COVER_SIZE, COVER_SIZE);
+                javafx.scene.canvas.GraphicsContext gc = canvas.getGraphicsContext2D();
+                
+                // Градиентный фон
+                for (int y = 0; y < COVER_SIZE; y++) {
+                    for (int x = 0; x < COVER_SIZE; x++) {
+                        double r = 0.1 + (0.3 * x / COVER_SIZE);
+                        double g = 0.1 + (0.3 * y / COVER_SIZE);
+                        double b = 0.4;
+                        gc.setFill(javafx.scene.paint.Color.color(r, g, b));
+                        gc.fillRect(x, y, 1, 1);
+                    }
+                }
+                
+                // Текст
+                gc.setFill(javafx.scene.paint.Color.WHITE);
+                gc.setFont(javafx.scene.text.Font.font("Arial", 18));
+                
+                String title = currentTrack.getTitle();
+                if (title.length() > 20) title = title.substring(0, 17) + "...";
+                gc.fillText(title, COVER_SIZE/2 - 50, COVER_SIZE/2 - 10);
+                
+                String artist = currentTrack.getArtist();
+                if (artist.length() > 25) artist = artist.substring(0, 22) + "...";
+                gc.fillText(artist, COVER_SIZE/2 - 60, COVER_SIZE/2 + 20);
+                
+                coverImageView.setImage(canvas.snapshot(null, null));
+                Logger.debug("Обложка по умолчанию создана для трека ID: " + trackId);
             }
-        }
-        
-        gc.setFill(javafx.scene.paint.Color.WHITE);
-        gc.setFont(javafx.scene.text.Font.font("Arial", 18));
-        
-        String title = currentTrack.getTitle();
-        if (title.length() > 20) title = title.substring(0, 17) + "...";
-        gc.fillText(title, COVER_SIZE/2 - 50, COVER_SIZE/2 - 10);
-        
-        String artist = currentTrack.getArtist();
-        if (artist.length() > 25) artist = artist.substring(0, 22) + "...";
-        gc.fillText(artist, COVER_SIZE/2 - 60, COVER_SIZE/2 + 20);
-        
-        coverImageView.setImage(canvas.snapshot(null, null));
-        Logger.debug("Обложка по умолчанию создана");
+        });
     }
     
     private void setupTimeListener() {
@@ -543,6 +580,9 @@ public class AudioPlayerWindow {
             seeking = false;
             userIsAdjusting = false;
             
+            // Загружаем обложку немедленно
+            loadCover(track.getCover(), track.getId());
+            
             if (mediaPlayer != null) {
                 Logger.debug("Остановка предыдущего медиаплеера");
                 mediaPlayer.stop();
@@ -550,7 +590,6 @@ public class AudioPlayerWindow {
                 mediaPlayer = null;
             }
             
-            loadCover(track.getCover());
             selectInList(trackIndex);
         });
         
@@ -664,6 +703,9 @@ public class AudioPlayerWindow {
             mediaPlayer.dispose();
             mediaPlayer = null;
         }
+        
+        // Очищаем кэш при закрытии окна
+        coverCache.clear();
     }
     
     public void show() {

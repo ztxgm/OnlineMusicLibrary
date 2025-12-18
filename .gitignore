@@ -1,7 +1,7 @@
 /lib
 
 /client/lib
-/client/server.log
+/client/client.log
 
 /server/lib
 /server/music_db.json
