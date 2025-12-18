@@ -65,6 +65,27 @@ public class AudioPlayerWindow {
         Logger.debug("Создание окна аудиоплеера");
         
         stage = new Stage();
+        
+        // Устанавливаем иконку приложения
+        try {
+            String iconPath = "src/icon.png";
+            File iconFile = new File(iconPath);
+            if (iconFile.exists()) {
+                stage.getIcons().add(new Image("file:" + iconPath));
+                Logger.debug("Иконка приложения загружена: " + iconPath);
+            } else {
+                // Попробуем альтернативный путь
+                iconPath = "icon.png";
+                iconFile = new File(iconPath);
+                if (iconFile.exists()) {
+                    stage.getIcons().add(new Image("file:" + iconPath));
+                    Logger.debug("Иконка приложения загружена: " + iconPath);
+                }
+            }
+        } catch (Exception e) {
+            Logger.error("Ошибка при загрузке иконки: " + e.getMessage());
+        }
+        
         stage.setTitle(currentTrack.getTitle());
         stage.setWidth(WINDOW_WIDTH);
         stage.setHeight(WINDOW_HEIGHT);

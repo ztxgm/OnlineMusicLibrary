@@ -6,6 +6,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+import javafx.scene.image.Image;
 import org.json.*;
 import java.io.*;
 import java.net.*;
@@ -28,6 +29,27 @@ public class Client extends Application {
     public void start(Stage primaryStage) {
         Logger.info("Запуск клиентского приложения OnlineMusicLibrary");
         
+        // Устанавливаем иконку приложения
+        try {
+            String iconPath = "src/icon.png";
+            File iconFile = new File(iconPath);
+            if (iconFile.exists()) {
+                primaryStage.getIcons().add(new Image("file:" + iconPath));
+                Logger.info("Иконка приложения загружена: " + iconPath);
+            } else {
+                Logger.warning("Файл иконки не найден: " + iconPath);
+                // Попробуем альтернативный путь
+                iconPath = "icon.png";
+                iconFile = new File(iconPath);
+                if (iconFile.exists()) {
+                    primaryStage.getIcons().add(new Image("file:" + iconPath));
+                    Logger.info("Иконка приложения загружена: " + iconPath);
+                }
+            }
+        } catch (Exception e) {
+            Logger.error("Ошибка при загрузке иконки: " + e.getMessage());
+        }
+        
         VBox root = new VBox(10);
         root.setPadding(new Insets(10));
         
@@ -38,7 +60,7 @@ public class Client extends Application {
         Button playButton = new Button("▶");
         Button addButton = new Button("+");
         Button editButton = new Button("✎");
-        Button deleteButton = new Button("🗑");
+        Button deleteButton = new Button("🗑");c
         
         // Добавляем всплывающие подсказки
         Tooltip reloadTooltip = new Tooltip("Обновить список треков");
@@ -360,7 +382,7 @@ public class Client extends Application {
     }
     
     private void loadTracks() {
-        Logger.info("Загрузка списка треков с сервером");
+        Logger.info("Загрузка списка треков с сервера");
         
         if (out == null) {
             Logger.error("Нет подключения к серверу для загрузки треков");
@@ -422,7 +444,7 @@ public class Client extends Application {
         }
         
         int selectedIndex = listView.getSelectionModel().getSelectedIndex();
-        Logger.info("Открытие аудиоплеера для трека: " + selectedTrack.getTitle() + " (индекс: " + selectedIndex + ")");
+        Logger.info("Открытие аудиоплеера для трекя: " + selectedTrack.getTitle() + " (индекс: " + selectedIndex + ")");
         
         // Если окно плеера уже существует, обновляем его
         if (playerWindow != null && playerWindow.isShowing()) {
@@ -515,4 +537,3 @@ public class Client extends Application {
         }
     }
 }
-

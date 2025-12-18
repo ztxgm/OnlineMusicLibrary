@@ -5,6 +5,7 @@ import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.scene.image.Image;
 import org.json.JSONObject;
 import java.io.*;
 import java.util.Base64;
@@ -151,6 +152,26 @@ public class TrackEditDialog extends Stage {
         
         Scene scene = new Scene(grid, 550, 350);
         setScene(scene);
+        
+        // Устанавливаем иконку приложения
+        try {
+            String iconPath = "src/icon.png";
+            File iconFile = new File(iconPath);
+            if (iconFile.exists()) {
+                this.getIcons().add(new Image("file:" + iconPath));
+                Logger.debug("Иконка приложения загружена: " + iconPath);
+            } else {
+                // Попробуем альтернативный путь
+                iconPath = "icon.png";
+                iconFile = new File(iconPath);
+                if (iconFile.exists()) {
+                    this.getIcons().add(new Image("file:" + iconPath));
+                    Logger.debug("Иконка приложения загружена: " + iconPath);
+                }
+            }
+        } catch (Exception e) {
+            Logger.error("Ошибка при загрузке иконки: " + e.getMessage());
+        }
     }
     
     private void fillFields(Client.MusicTrack track) {
