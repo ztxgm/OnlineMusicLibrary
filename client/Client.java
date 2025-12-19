@@ -176,6 +176,13 @@ public class Client extends Application {
             if (playerWindow != null) {
                 playerWindow.stopAudio();
             }
+            if (socket != null && !socket.isClosed()) {
+                try {
+                    socket.close();
+                } catch (IOException ex) {
+                    Logger.error("Ошибка при закрытии сокета клиента: " + ex.getMessage());
+                }
+            }
             Logger.close();
         });
         
@@ -365,6 +372,7 @@ public class Client extends Application {
             }
             
             socket = new Socket(currentServer, currentPort);
+            socket.setSoTimeout(10000); // 10 секунд таймаут
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
             
@@ -399,6 +407,10 @@ public class Client extends Application {
             
             // Получаем JSON ответ
             String response = in.readLine();
+            if (response == null) {
+                throw new IOException("Пустой ответ от сервера");
+            }
+            
             JSONObject jsonResponse = new JSONObject(response);
             
             if (!jsonResponse.getString("status").equals("OK")) {
