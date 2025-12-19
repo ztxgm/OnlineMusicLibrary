@@ -1,1 +1,11 @@
 /lib
+
+/client/lib
+/client/client.log
+
+/server/lib
+/server/music_db.json
+/server/server.log
+/server/music
+/server/covers
+
